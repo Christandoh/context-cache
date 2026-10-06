@@ -5,3 +5,5 @@ tsconfig.json
 # written by /cache-status into the session's working directory
 context-cache-status.json
 node_modules/
+# the renderer writes an SVG beside each PNG; only the PNGs are published
+docs/*.svg
