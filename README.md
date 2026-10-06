@@ -10,7 +10,7 @@ A Claude Code mod that puts your context window, your usage limits and your prom
 
 ![The panel in the desktop app, live data](docs/wide-real.png)
 
-That's a real session. 484k of a 1M context window, the session limit at 34% with 54% of its five hours gone, the weekly and Fable limits, and a prompt cache that is warm with 59 minutes left. The notice at the bottom says what the next message will cost you and offers the three things you can do about it.
+That's a real session. 484k of a 1M context window, the session limit at 34% with 54% of its five hours gone, the weekly and Fable limits, and a prompt cache that is warm with 59 minutes left. The notice at the bottom says what the next message will cost you, with Clear and Compact beside it. This screenshot predates 0.1.5 and still shows a Later button.
 
 ## Why
 
@@ -26,7 +26,9 @@ The top row is the context window. Tokens used out of the window, in four groups
 
 The middle row is three limits and the cache. Current session (5 hours), Weekly (7 days) and Fable (the model-specific weekly window), each with the double bar described above, the two percentages and the reset time. Then the cache. Warm, Cooling or Cold, a temperature bar, how warm it is as a percentage of its time-to-live, the last reply's cache hit rate, and minutes left.
 
-The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation. Later hides the notice until the cache changes state.
+The bottom row is a one-line notice about the cache with two buttons. Clear runs `/clear`. Compact compacts the conversation. The row never hides, whatever the cache holds, so the buttons are always there. With nothing cached yet, in a fresh session or after `/clear` or a compaction, it says how much the next message will write to the cache.
+
+![900 px, nothing cached yet](docs/empty-900.png)
 
 ## Four widths
 
@@ -55,7 +57,7 @@ Two limits of the platform worth knowing. The desktop app's ordinary chat has no
 
 ## Commands
 
-`/cache` hides or shows the card. Showing it again also brings back a notice you dismissed with Later.
+`/cache` hides or shows the card.
 
 `/cache-status` prints a diagnostics report. Which apps are attached, what the mod has drawn, where each figure came from, and how the last account usage request went (auth kind, HTTP status, the windows in the response and which one matched Fable). The full report also lands in `context-cache-status.json` in the session's working directory.
 
@@ -80,10 +82,10 @@ Every figure has a named source. One is worked out rather than reported: Files i
 | Fable, and any reset time a header lacks | Anthropic's account usage endpoint (`api.anthropic.com/api/oauth/usage`), called through Claude Code with your session's own login, so the mod never sees the token. Asked once at session start, then every 5 minutes, and on `/cache-refresh`. Fable is the `limits[]` item whose scope names Fable, matched by name so a moved key still works |
 | Time % | worked out from each window's reset time and its length (5h or 7d) |
 | Cache TTL (5m or 60m) | read from the `cache_creation` usage of your last response in the transcript, or from Claude Code's own report when you switch model; remembered across sessions |
-| Last cache write | the end of the last main-conversation turn (or, on resume, how long ago the last response was) |
-| Hit % | the last turn's cache reads divided by (cache reads + cache writes + uncached input) |
+| Last cache write | each reply in the main conversation as it arrives, mid-turn included (or, on resume, how long ago the last response was) |
+| Hit % | cache reads divided by (cache reads + cache writes + uncached input), for the last reply during a turn and for the whole turn once it ends |
 
-Warmth is remaining TTL divided by TTL. Warm above 25%, Cooling between 1 and 25%, Cold at 0%. A `/clear`, a compaction or a model switch empties the cache, and the card shows "Nothing cached yet" until the next response.
+Warmth is remaining TTL divided by TTL. Warm above 25%, Cooling between 1 and 25%, Cold at 0%. A `/clear`, a compaction or a model switch empties the cache, and the card shows "Nothing cached yet" until the first reply of the next turn arrives.
 
 ## Working on it
 

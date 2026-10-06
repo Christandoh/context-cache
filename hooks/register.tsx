@@ -32,7 +32,6 @@ import {
 import { renderDesktop, renderTerminal, type Actions } from './view'
 
 const snapshotAtom = atom({ plugin: 'context-cache', key: 'snapshot' } as const, null)
-const dismissedAtom = atom({ plugin: 'context-cache', key: 'dismissed' } as const, null)
 const hiddenAtom = atom({ plugin: 'context-cache', key: 'isHidden' } as const, false)
 const nowAtom = atom({ plugin: 'context-cache', key: 'now' } as const, 0)
 // Desktop and mobile draw the design in CSS px, but the band is measured in
@@ -347,21 +346,15 @@ function designCells(px: number): number {
 
 /** The view model for a drawing, or null while hidden or before any reading. */
 async function panelModel($: EngineInterface, columns: number, maxRows: number): Promise<ViewModel | null> {
-  const [snap, hidden, dismissed, tick] = await Promise.all([
-    read($, snapshotAtom),
-    read($, hiddenAtom),
-    read($, dismissedAtom),
-    read($, nowAtom),
-  ])
+  const [snap, hidden, tick] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom), read($, nowAtom)])
   if (hidden || !snap) return null
-  return buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows, dismissed)
+  return buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows)
 }
 
-/** Clear, Compact and Later, each dismissing the notice for the current cache state. */
-function actionsFor($: EngineInterface, state: string, isWorking: boolean): Actions {
+/** Clear and Compact. Neither hides the notice row: it stays on whatever the cache holds. */
+function actionsFor($: EngineInterface, isWorking: boolean): Actions {
   return {
     clear: async () => {
-      await update($, dismissedAtom, () => state)
       if (isWorking) $.ui.toast('Clear runs once the current turn finishes.')
       try {
         await $.command.run({ command: 'clear' })
@@ -370,7 +363,6 @@ function actionsFor($: EngineInterface, state: string, isWorking: boolean): Acti
       }
     },
     compact: async () => {
-      await update($, dismissedAtom, () => state)
       try {
         const r = await $.session.compact()
         if ('skip' in r) {
@@ -383,9 +375,6 @@ function actionsFor($: EngineInterface, state: string, isWorking: boolean): Acti
       } catch {
         $.ui.toast('Compact runs between turns: try again when this one finishes.')
       }
-    },
-    later: async () => {
-      await update($, dismissedAtom, () => state)
     },
   }
 }
@@ -435,6 +424,21 @@ export const register: Register = on => {
     void learnTtl($, e.transcript_path)
     return next(e)
   }).catch((_$, e, next) => next(e))
+
+  // Each main-thread response writes/reads the cache as it lands, so a long
+  // turn (or the first one after /clear) does not sit at "Empty" until it ends.
+  on('turn.step', async function* ($, e, next) {
+    const r = yield* next(e)
+    const u = r.usage
+    if (e.agentId === undefined && u) {
+      const total = u.cache_read_input_tokens + u.cache_creation_input_tokens + u.input_tokens
+      void $.clock
+        .now()
+        .then(now => patchCache($, { lastAt: now, hitRate: total > 0 ? u.cache_read_input_tokens / total : null }))
+        .catch(() => undefined)
+    }
+    return r
+  })
 
   // A turn of the main conversation ended: its requests just wrote/read the cache.
   on('turn.complete', async ($, e, next) => {
@@ -488,7 +492,6 @@ export const register: Register = on => {
     const result = await next(e)
     if (e.reason === 'clear') {
       await patchCache($, { lastAt: null, hitRate: null })
-      await update($, dismissedAtom, () => null)
       void refresh($)
     }
     return result
@@ -524,8 +527,6 @@ export const register: Register = on => {
     const isHidden = await read($, hiddenAtom)
     await update($, hiddenAtom, () => !isHidden)
     if (isHidden) {
-      // Showing it again also brings back a notice dismissed with Later.
-      await update($, dismissedAtom, () => null)
       void refresh($)
       // Phones have no band above the prompt: show it there as a pane.
       if (await hasMobile($)) await $.ui.open({ id: PANE, title: 'Context & cache' })
@@ -555,13 +556,13 @@ export const register: Register = on => {
     if (e.surface === 'terminal') {
       const vm = await panelModel($, e.props.bodyColumns, e.props.maxRows)
       if (!vm) return next(e)
-      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, actionsFor($, vm.cache.state, e.props.isWorking))
+      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, actionsFor($, e.props.isWorking))
     }
     if (e.surface === 'desktop' || e.surface === 'vscode') {
       const px = await widthPx($, e.props.bodyColumns)
       const vm = await panelModel($, designCells(px), e.props.maxRows)
       if (!vm) return next(e)
-      return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, actionsFor($, vm.cache.state, e.props.isWorking))
+      return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, actionsFor($, e.props.isWorking))
     }
     return next(e)
   })
@@ -576,11 +577,11 @@ export const register: Register = on => {
     if (e.surface === 'terminal') {
       const vm = await panelModel($, e.props.bodyColumns, rows)
       if (!vm) return <Text dimColor>Reading usage…</Text>
-      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, actionsFor($, vm.cache.state, false))
+      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, actionsFor($, false))
     }
     const px = await widthPx($, e.props.bodyColumns)
     const vm = await panelModel($, designCells(px), rows)
     if (!vm) return <Text dimColor>Reading usage…</Text>
-    return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, actionsFor($, vm.cache.state, false))
+    return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, actionsFor($, false))
   })
 }

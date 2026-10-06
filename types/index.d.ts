@@ -54,8 +54,6 @@ declare module 'claude-code' {
   interface PluginState {
     'context-cache': {
       snapshot: ContextCacheSnapshot | null
-      /** The cache state the notice was dismissed in; it shows again once the state changes. */
-      dismissed: string | null
       isHidden: boolean
       /** The clock, written once a second so the countdown redraws. */
       now: number

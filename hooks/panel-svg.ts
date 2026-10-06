@@ -207,10 +207,10 @@ function svgDoc(width: number, height: number, body: string, alt: string): strin
   )
 }
 
-/** Width of the design's three buttons and their gaps. */
+/** Width of the design's two buttons and their gap. */
 function buttonsWidthOf(): number {
   const b = (label: string, padX: number, border: number) => textWidth(label, 12.5) + padX * 2 + border * 2
-  return b('Clear', 12, 0) + b('Compact', 12, 1) + b('Later', 8, 0) + 6 * 2
+  return b('Clear', 12, 0) + b('Compact', 12, 1) + 6
 }
 
 /**

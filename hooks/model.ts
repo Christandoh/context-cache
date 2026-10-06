@@ -366,10 +366,11 @@ export function cacheView(cache: ContextCacheCache, now: number): CacheView {
   }
 }
 
-/** The notice line's copy. Null when there is nothing to say. */
-export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number): string | null {
-  if (cache.state === 'empty' || !context) return null
+/** The notice line's copy. Always a line: the row with Clear / Compact never hides. */
+export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number): string {
+  if (!context) return cache.state === 'empty' ? 'Cache empty: nothing cached yet.' : `Cache ${cache.label.toLowerCase()}: reading context size…`
   const tokens = fmtTokens(context.used)
+  if (cache.state === 'empty') return `Cache empty: next message writes ${tokens} to cache.`
   if (cache.state === 'warm') {
     const usedPct = (context.used / context.window) * 100
     if (context.autoCompactAt !== null && usedPct >= 85) {
@@ -423,7 +424,7 @@ export type ViewModel = {
   } | null
   limits: LimitView[]
   cache: CacheView
-  notice: string | null
+  notice: string
   showLegend: boolean
   showDetail: boolean
 }
@@ -433,14 +434,12 @@ export function buildView(
   now: number,
   columns: number,
   maxRows: number,
-  dismissed: string | null,
 ): ViewModel {
   let size = sizeClassOf(columns)
   const cache = cacheView(snap.cache, now)
-  const rawNotice = noticeText(cache, snap.context, snap.cache.ttlMs)
-  const notice = dismissed === cache.state ? null : rawNotice
+  const notice = noticeText(cache, snap.context, snap.cache.ttlMs)
   // Fall back to a shorter layout when the band has fewer rows than it needs.
-  while (size !== 'd' && rowsFor(size, notice !== null) > maxRows) {
+  while (size !== 'd' && rowsFor(size, true) > maxRows) {
     size = size === 'a' ? 'c' : size === 'b' ? 'c' : 'd'
   }
 
