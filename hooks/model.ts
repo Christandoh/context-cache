@@ -366,7 +366,7 @@ export function cacheView(cache: ContextCacheCache, now: number): CacheView {
   }
 }
 
-/** The notice line's copy, per the handoff. Null when there is nothing to say. */
+/** The notice line's copy. Null when there is nothing to say. */
 export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number): string | null {
   if (cache.state === 'empty' || !context) return null
   const tokens = fmtTokens(context.used)

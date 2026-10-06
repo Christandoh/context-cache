@@ -7,3 +7,8 @@ context-cache-status.json
 node_modules/
 # the renderer writes an SVG beside each PNG; only the PNGs are published
 docs/*.svg
+# kept on disk, not published: the tests and the renderer for the docs/ cards
+tests/
+scripts/cards.mts
+scripts/package.json
+scripts/package-lock.json

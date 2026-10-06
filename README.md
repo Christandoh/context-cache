@@ -113,12 +113,7 @@ Check it with:
 
 ```
 claude plugin validate .
-claude plugin test .
 ```
-
-`tests/scenarios.test.tsx` feeds the four design scenarios in through the real engine calls (`session.usage`, the usage endpoint, `turn.complete`, a resumed session) and checks each at 900, 620, 420 and 320 px on the terminal and the desktop, plus the Clear, Compact and Later buttons. `tests/edges.test.tsx` covers what goes wrong in practice. Nothing read yet, a 429 from the account endpoint, a window past 100%, a missing reset time, a 5-minute TTL, bands 20 and 400 cells wide, and every SVG staying well formed and under the host's 128 KB limit. 69 tests in all.
-
-`scripts/cards.mts` renders the four width cards in `docs/` from the mod's own drawing code. When the design or the copy changes, `cd scripts && npm install && npm run cards` redraws them.
 
 `hooks/register.tsx` holds the hooks: data collection, the commands and the band. `hooks/model.ts` is the maths, thresholds and copy, with no drawing in it. `hooks/view.tsx` draws the terminal version in cells and the desktop version as the SVG panel plus the host's buttons. `hooks/panel-svg.ts` lays the design out as SVG at its real pixel sizes, measuring text with the font widths in `hooks/metrics.ts`. `types/index.d.ts` is the mod's `$.state` contract.
 
