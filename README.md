@@ -1,22 +1,67 @@
 # context-cache
 
-A Claude Code mod that adds a panel above the prompt, in the terminal and in the desktop app's Code tab. On the Claude mobile app, which has no room above the prompt for mods, the same panel opens as a pane.
+A Claude Code mod that puts your context window, your usage limits and your prompt cache on one card above the prompt. It shows in the terminal, in the desktop app's Code tab and, as a pane, on the phone.
 
-The top row is the context window. Tokens used out of the window, split into System, Tools, Files and Messages, with a tick where auto-compact will fire.
+![The panel in the desktop app, live data](docs/wide-real.png)
 
-Under it, three limits. Current session (5h), Weekly and Fable each get a double bar. The dark layer is how much of the window's time has passed, the bright layer how much of the allowance you have used, and a white tick marks the time position, so you can see at a glance whether you are ahead of pace. The bar turns amber when usage runs well ahead of time and red at 90%.
+That's a real session. 484k of a 1M context window, the session limit at 34% with 54% of its five hours gone, the weekly and Fable limits, and a prompt cache that is warm with 59 minutes left. The notice at the bottom says what the next message will cost you and offers the three things you can do about it.
 
-Beside them, the prompt cache. Warm, Cooling or Cold, a temperature bar, the warmth percentage, the last turn's hit rate and a countdown to expiry.
+## Why
 
-The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`, Compact compacts the conversation, Later hides the notice until the cache changes state.
+Claude Code already tells you all of this, in three places. `/context` has the window, `/usage` has the limits, and the cache is in the usage figures if you know where to look. None of it is on screen while you work, and the one number that changes what you do next, whether your cache is about to expire, isn't anywhere.
+
+The cache matters more than it looks. Every reply re-sends the whole conversation. With the cache warm, 98% of that is served from memory at a tenth of the price. Let it go cold, by walking away for an hour, and the next message pays full price to re-read everything. The panel counts that down and tells you before it happens.
+
+The limits matter too, and in a particular way. Being at 60% of your weekly allowance is fine on Saturday and a problem on Tuesday. So each limit bar carries two layers. The dark one is how much of the window's time has passed, the bright one is how much you've used, and a white tick marks where time is. If the bright bar is past the tick you're ahead of pace, and the bar turns amber. At 90% it turns red.
+
+## What's on the card
+
+The top row is the context window. Tokens used out of the window, in four groups (System, Tools, Files, Messages) with a legend under the bar and a tick where auto-compact will fire.
+
+The middle row is three limits and the cache. Current session (5 hours), Weekly (7 days) and Fable (the model-specific weekly window), each with the double bar described above, the two percentages and the reset time. Then the cache. Warm, Cooling or Cold, a temperature bar, how warm it is as a percentage of its time-to-live, the last reply's cache hit rate, and minutes left.
+
+The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation. Later hides the notice until the cache changes state.
+
+## Four widths
+
+The card re-lays itself as the window changes. Columns down to about 500 px, rings below that, and the legend drops at about 360 px. All four were drawn first in a design file and the panel reproduces them to the pixel.
+
+![900 px, a cooling cache](docs/wide-900.png)
+
+![620 px, two limits in the red and an auto-compact warning](docs/medium-620.png)
+
+![420 px, rings](docs/narrow-420.png)
+
+![320 px, a cold cache](docs/phone-320.png)
+
+The narrow layout as it looks in the desktop app:
+
+![The rings layout in the desktop app](docs/narrow-real.png)
+
+And the design file beside the panel, same scenarios, same widths:
+
+![The design on top, the panel underneath, at 900, 620, 420 and 320 px](docs/design-vs-mod.png)
+
+## Install
+
+```
+claude plugin marketplace add Christandoh/context-cache
+claude plugin install context-cache@chris-mods
+```
+
+Inside a session, `/plugin marketplace add Christandoh/context-cache` and then `/plugin install context-cache@chris-mods` do the same. Installed at the user scope, it loads in every Claude Code session, including the desktop app's Code tab. Start a new session and the card is there.
+
+Installing puts a copy in your plugin cache. `claude plugin update context-cache@chris-mods` fetches a new release whenever `version` in `plugin.json` has changed.
+
+Two limits of the platform worth knowing. The desktop app's ordinary chat has no plugin surface, so the card can't appear there. And the panel's figures for the weekly and Fable limits come from an endpoint Anthropic hasn't documented (`/usage` reads the same one). If that endpoint changes, the Fable column shows "No data" and everything else keeps working.
 
 ## Commands
 
-`/cache` hides or shows the panel. Showing it again also brings back a notice you dismissed with Later.
+`/cache` hides or shows the card. Showing it again also brings back a notice you dismissed with Later.
 
 `/cache-status` prints a diagnostics report. Which apps are attached, what the mod has drawn, where each figure came from, and how the last account usage request went (auth kind, HTTP status, the windows in the response and which one matched Fable). The full report also lands in `context-cache-status.json` in the session's working directory.
 
-`/cache-pane` opens the panel as a pane, on any device.
+`/cache-pane` opens the card as a pane, on any device.
 
 `/cache-refresh` re-reads usage now instead of waiting for the next poll.
 
@@ -24,46 +69,29 @@ The bottom row is a one-line notice about the cache with three buttons. Clear ru
 
 These are five separate commands rather than one with arguments because the desktop composer drops anything typed after a slash command's name.
 
-On the desktop, in the editor and on the phone the panel is one SVG at the design's pixel sizes (`hooks/panel-svg.ts`), with the host's own buttons for Clear / Compact / Later; the terminal draws it in cells. The band exists in Claude Code only (terminal, the desktop app's Code tab, VS Code, the mobile app's Code sessions). The desktop app's ordinary chat has no plugin surface, so the panel cannot appear there.
-
-On a phone the pane opens by itself, whether you open an existing session there or start one from the phone, and `/cache` opens it too. The phone gets the narrow ring layout.
-
 ## Where the numbers come from
+
+Nothing on the card is estimated or sampled; each figure has a source.
 
 | Figure | Source |
 |---|---|
 | Context used, window, auto-compact point | `$.session.usage()`, the same figures as the status line and `/context` |
 | System / Tools / Messages split | the `/context` breakdown, scaled to the real token count |
 | Files | the share of Messages that is file contents read by the `Read` tool |
-| Session, weekly and Fable limits | Anthropic's account usage endpoint (`api.anthropic.com/api/oauth/usage`, the source `/usage` uses), called with your session's own login through Claude Code; the mod never sees the token. It is asked once at session start, then every 5 minutes, and on `/cache-refresh`; more often and it answers 429. Fable is the `limits[]` item whose scope names Fable, matched by name so a moved key still works. The session and weekly figures themselves come from the rate-limit headers of every reply, which are fresher; the account reading supplies Fable and any reset time a header lacks, and stands in for all three if the headers are missing |
+| Session and weekly limits | the rate-limit headers of every reply, so they move with each message |
+| Fable, and any reset time a header lacks | Anthropic's account usage endpoint (`api.anthropic.com/api/oauth/usage`), called through Claude Code with your session's own login, so the mod never sees the token. Asked once at session start, then every 5 minutes, and on `/cache-refresh`. Fable is the `limits[]` item whose scope names Fable, matched by name so a moved key still works |
 | Time % | worked out from each window's reset time and its length (5h or 7d) |
 | Cache TTL (5m or 60m) | read from the `cache_creation` usage of your last response in the transcript, or from Claude Code's own report when you switch model; remembered across sessions |
 | Last cache write | the end of the last main-conversation turn (or, on resume, how long ago the last response was) |
-| Hit % | the last turn's cache reads ÷ (cache reads + cache writes + uncached input) |
+| Hit % | the last turn's cache reads divided by (cache reads + cache writes + uncached input) |
 
-The Fable column (and, between polls, the session and weekly ones) comes from an endpoint Anthropic has not documented; `/usage` reads the same one. If it changes, that column shows "No data" and everything else keeps working.
+Warmth is remaining TTL divided by TTL. Warm above 25%, Cooling between 1 and 25%, Cold at 0%. A `/clear`, a compaction or a model switch empties the cache, and the card shows "Nothing cached yet" until the next response.
 
-Warmth = remaining TTL ÷ TTL. Warm above 25%, Cooling between 1 and 25%, Cold at 0%. A `/clear`, a compaction or a model switch empties the cache, and the panel shows "Nothing cached yet" until the next response.
-
-## Install
-
-This folder is both the plugin and a one-plugin marketplace (`.claude-plugin/marketplace.json` lists it with `source: "./"`), which is the layout Claude Code's docs give for hosting a plugin on GitHub.
-
-**From GitHub (for everyone).**
+## Working on it
 
 ```
-claude plugin marketplace add Christandoh/context-cache
-claude plugin install context-cache@chris-mods
-```
-
-Inside a session, `/plugin marketplace add Christandoh/context-cache` and then `/plugin install context-cache@chris-mods` do the same. Installed at the user scope, it loads in every Claude Code session, including the desktop app's Code tab.
-
-Installing from GitHub puts a copy in your plugin cache. `claude plugin update context-cache@chris-mods` fetches a new release whenever `version` in `plugin.json` has changed, which is why every published change bumps the version.
-
-**From a clone (for working on it).**
-
-```
-claude plugin marketplace add /path/to/context-cache
+git clone https://github.com/Christandoh/context-cache
+claude plugin marketplace add ./context-cache
 claude plugin install context-cache@chris-mods
 ```
 
@@ -74,28 +102,16 @@ claude plugin uninstall context-cache@chris-mods
 claude plugin install context-cache@chris-mods
 ```
 
-then `/reload-plugins` in an open session. Slash commands register when a session starts, so a brand-new command needs a new session.
+then `/reload-plugins` in an open session. Slash commands register when a session starts, so a brand-new command needs a new session. For a single terminal session, `claude --plugin-dir ./context-cache` skips the install.
 
-**For one terminal session only.**
-
-```
-claude --plugin-dir /path/to/context-cache
-```
-
-## Develop
+Check it with:
 
 ```
 claude plugin validate .
 claude plugin test .
 ```
 
-`tests/scenarios.test.tsx` feeds the four design scenarios in through the real engine calls (`session.usage`, the usage endpoint, `turn.complete`, a resumed session) and checks each at 900, 620, 420 and 320 px on the terminal and the desktop, plus the Clear, Compact and Later buttons.
-
-`tests/edges.test.tsx` covers what goes wrong in practice. Nothing read yet, a 429 from the account endpoint, a window past 100%, a missing reset time, a 5-minute TTL, bands 20 and 400 cells wide, and every SVG staying well formed and under the host's 128 KB limit.
-
-69 tests in all.
-
-## Files
+`tests/scenarios.test.tsx` feeds the four design scenarios in through the real engine calls (`session.usage`, the usage endpoint, `turn.complete`, a resumed session) and checks each at 900, 620, 420 and 320 px on the terminal and the desktop, plus the Clear, Compact and Later buttons. `tests/edges.test.tsx` covers what goes wrong in practice. Nothing read yet, a 429 from the account endpoint, a window past 100%, a missing reset time, a 5-minute TTL, bands 20 and 400 cells wide, and every SVG staying well formed and under the host's 128 KB limit. 69 tests in all.
 
 `hooks/register.tsx` holds the hooks: data collection, the commands and the band. `hooks/model.ts` is the maths, thresholds and copy, with no drawing in it. `hooks/view.tsx` draws the terminal version in cells and the desktop version as the SVG panel plus the host's buttons. `hooks/panel-svg.ts` lays the design out as SVG at its real pixel sizes, measuring text with the font widths in `hooks/metrics.ts`. `types/index.d.ts` is the mod's `$.state` contract.
 
