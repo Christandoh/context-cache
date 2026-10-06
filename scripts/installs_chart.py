@@ -21,7 +21,8 @@ def load(new_path, now):
     json.dump(dict(sorted(hist.items())), open('clones.json', 'w'), indent=1)
     today = now.date()
     # Start a day before the first clone so the line starts at zero and there are always two points.
-    start = min([dt.date.fromisoformat(k) for k in hist] + [today]) - dt.timedelta(days=1)
+    # GitHub also reports zero days from before the repo existed, so those don't count as a start.
+    start = min([dt.date.fromisoformat(k) for k, v in hist.items() if v] + [today]) - dt.timedelta(days=1)
     days = [start + dt.timedelta(days=i) for i in range((today - start).days + 1)]
     daily = [hist.get(d.isoformat(), 0) for d in days]
     cum, t = [], 0
