@@ -259,8 +259,16 @@ async function doRefresh($: EngineInterface, forceAccount: boolean) {
   let limits: ContextCacheLimit[]
   let limitsSource: ContextCacheSnapshot['limitsSource']
   if (isAccountFresh && accountLimits) {
-    // The account reading is the fuller one; the headers fill any window it lacks.
-    limits = [...accountLimits, ...responseLimits.filter(r => !accountLimits!.some(a => a.kind === r.kind))]
+    // The headers arrive with every reply, so they win for the windows they
+    // carry (session, weekly); the account reading, up to 5 minutes old, adds
+    // the ones they lack (Fable) and a reset time a header left out.
+    limits = [
+      ...responseLimits.map(r => {
+        const a = accountLimits!.find(x => x.kind === r.kind)
+        return r.resetsAt === null && a ? { ...r, resetsAt: a.resetsAt } : r
+      }),
+      ...accountLimits.filter(a => !responseLimits.some(r => r.kind === a.kind)),
+    ]
     limitsSource = 'account'
   } else if (responseLimits.length > 0) {
     limits = responseLimits
