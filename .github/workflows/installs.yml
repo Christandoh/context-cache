@@ -1,0 +1,37 @@
+# Draws the README installs graphics. A marketplace add clones this repo, so clones are installs.
+# GitHub keeps clone traffic for 14 days only, so once a day this merges the daily counts into
+# clones.json on the traffic branch and redraws the badge and chart there (scripts/installs_chart.py).
+# Needs a TRAFFIC_TOKEN secret, a fine-grained token for this repo with read access to Administration.
+name: installs
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  draw:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Count and draw
+        env:
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+        run: |
+          cp scripts/installs_chart.py /tmp/
+          gh api "repos/$GITHUB_REPOSITORY/traffic/clones" > /tmp/new.json
+          if git fetch -q origin traffic; then
+            git checkout -q traffic
+          else
+            git checkout -q --orphan traffic
+            git rm -rfq .
+          fi
+          summary=$(python3 /tmp/installs_chart.py /tmp/new.json)
+          git add clones.json badge.svg line-*.svg
+          if ! git diff --cached --quiet; then
+            git -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com commit -qm "$summary"
+            git push -q origin traffic
+          fi
