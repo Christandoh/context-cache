@@ -34,14 +34,6 @@ The card re-lays itself as the window changes. Columns down to about 500 px, rin
 
 ![320 px, a cold cache](docs/phone-320.png)
 
-The narrow layout as it looks in the desktop app:
-
-![The rings layout in the desktop app](docs/narrow-real.png)
-
-And the design file beside the panel, same scenarios, same widths:
-
-![The design on top, the panel underneath, at 900, 620, 420 and 320 px](docs/design-vs-mod.png)
-
 ## Install
 
 ```
