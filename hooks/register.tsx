@@ -46,6 +46,8 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 // tools that use it hold to one request per 5 minutes, so this does too. The
 // 5h/7d figures still move every response through the rate-limit headers.
 const ACCOUNT_EVERY_MS = 5 * 60_000
+// Two reset times this close describe the same window (the sources round differently).
+const SAME_WINDOW_MS = 30 * 60_000
 const MAX_TRANSCRIPT_BYTES = 4 * 1024 * 1024 - 1024
 
 const emptyCache = (ttlMs: number, isTtlKnown: boolean): ContextCacheCache => ({
@@ -259,13 +261,20 @@ async function doRefresh($: EngineInterface, forceAccount: boolean) {
   let limits: ContextCacheLimit[]
   let limitsSource: ContextCacheSnapshot['limitsSource']
   if (isAccountFresh && accountLimits) {
-    // The headers arrive with every reply, so they win for the windows they
-    // carry (session, weekly); the account reading, up to 5 minutes old, adds
-    // the ones they lack (Fable) and a reset time a header left out.
+    // The headers arrive with every reply and the account reading is up to 5
+    // minutes old, yet the headers can trail it (weekly 25% against the
+    // account's and /usage's 26%). Usage only climbs inside a window, so for
+    // the same window the higher reading is the newer one; across a reset the
+    // later window wins. The account adds what the headers lack (Fable).
     limits = [
       ...responseLimits.map(r => {
         const a = accountLimits!.find(x => x.kind === r.kind)
-        return r.resetsAt === null && a ? { ...r, resetsAt: a.resetsAt } : r
+        if (!a) return r
+        const resetsAt = r.resetsAt ?? a.resetsAt
+        if (resetsAt !== null && a.resetsAt !== null && Math.abs(resetsAt - a.resetsAt) > SAME_WINDOW_MS) {
+          return a.resetsAt > resetsAt ? a : { ...r, resetsAt }
+        }
+        return { ...r, resetsAt, usage: Math.max(r.usage, a.usage) }
       }),
       ...accountLimits.filter(a => !responseLimits.some(r => r.kind === a.kind)),
     ]

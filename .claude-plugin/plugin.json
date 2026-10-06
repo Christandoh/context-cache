@@ -1,6 +1,6 @@
 {
   "name": "context-cache",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A panel above the prompt showing context usage, usage limits (session, weekly, Fable) and prompt-cache temperature, with Clear / Compact actions.",
   "author": {
     "name": "Chris Tandoh"

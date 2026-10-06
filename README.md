@@ -76,7 +76,7 @@ Every figure has a named source. One is worked out rather than reported: Files i
 | Context used, window, auto-compact point | `$.session.usage()`, the same figures as the status line and `/context` |
 | System / Tools / Messages split | the `/context` breakdown, scaled to the real token count |
 | Files | the share of Messages that is `Read` output, by character count |
-| Session and weekly limits | the rate-limit headers of every reply, so they move with each message |
+| Session and weekly limits | the rate-limit headers of every reply, so they move with each message. The headers can trail the account endpoint by a point, so when both describe the same window the panel shows the higher of the two, which matches `/usage` |
 | Fable, and any reset time a header lacks | Anthropic's account usage endpoint (`api.anthropic.com/api/oauth/usage`), called through Claude Code with your session's own login, so the mod never sees the token. Asked once at session start, then every 5 minutes, and on `/cache-refresh`. Fable is the `limits[]` item whose scope names Fable, matched by name so a moved key still works |
 | Time % | worked out from each window's reset time and its length (5h or 7d) |
 | Cache TTL (5m or 60m) | read from the `cache_creation` usage of your last response in the transcript, or from Claude Code's own report when you switch model; remembered across sessions |
