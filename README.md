@@ -1,7 +1,7 @@
 # Context-cache
 
 [![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FChristandoh%2Fcontext-cache%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=555)](.claude-plugin/plugin.json)
-[![installs](https://raw.githubusercontent.com/Christandoh/context-cache/traffic/badge.svg)](#install)
+[![installs](https://raw.githubusercontent.com/Christandoh/context-cache/traffic/badge.svg)](#installs)
 [![stars](https://img.shields.io/github/stars/Christandoh/context-cache?style=flat)](https://github.com/Christandoh/context-cache/stargazers)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-d97757)](#install)
@@ -50,13 +50,6 @@ claude plugin install context-cache@chris-mods
 Inside a session, `/plugin marketplace add Christandoh/context-cache` and then `/plugin install context-cache@chris-mods` do the same. Installed at the user scope, it loads in every Claude Code session, including the desktop app's Code tab. Start a new session and the card is there.
 
 Installing puts a copy in your plugin cache. `claude plugin update context-cache@chris-mods` fetches a new release whenever `version` in `plugin.json` has changed.
-
-The installs badge and the chart below count clones of this repo. Adding the marketplace clones it, so each install shows up as one. Reinstalls and updates clone it too, so the number runs a little high. Nothing is sent from your machine.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Christandoh/context-cache/traffic/line-dark.svg">
-  <img alt="Installs over time" src="https://raw.githubusercontent.com/Christandoh/context-cache/traffic/line-light.svg" width="100%">
-</picture>
 
 Two limits of the platform worth knowing. The desktop app's ordinary chat has no plugin surface, so the card can't appear there. And the panel's figures for the weekly and Fable limits come from an endpoint Anthropic hasn't documented (`/usage` reads the same one). If that endpoint changes, the Fable column shows "No data" and everything else keeps working.
 
@@ -120,3 +113,12 @@ claude plugin validate .
 ## Licence
 
 MIT. See `LICENSE`.
+
+## Installs
+
+The installs badge and the chart below count clones of this repo. Adding the marketplace clones it, so each install shows up as one. Reinstalls and updates clone it too, so the number runs a little high. Nothing is sent from your machine.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Christandoh/context-cache/traffic/line-dark.svg">
+  <img alt="Installs over time" src="https://raw.githubusercontent.com/Christandoh/context-cache/traffic/line-light.svg" width="100%">
+</picture>
