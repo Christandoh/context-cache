@@ -1,0 +1,14 @@
+{
+  "name": "chris-mods",
+  "owner": {
+    "name": "Chris Tandoh"
+  },
+  "plugins": [
+    {
+      "name": "context-cache",
+      "source": "./",
+      "description": "A panel above the prompt: context usage, session / weekly / Fable limits, and prompt-cache temperature, with Clear and Compact."
+    }
+  ],
+  "description": "Chris Tandoh's Claude Code mods"
+}

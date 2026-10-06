@@ -1,0 +1,7 @@
+# written by the engine when it loads the mod
+.claude-plugin/types/
+.in_use
+tsconfig.json
+# written by /cache-status into the session's working directory
+context-cache-status.json
+node_modules/
