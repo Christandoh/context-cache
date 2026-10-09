@@ -345,7 +345,9 @@ export function cacheView(cache: ContextCacheCache, now: number): CacheView {
       detail: 'Nothing cached yet',
     }
   }
-  const remainingMs = Math.max(0, cache.lastAt + ttl - now)
+  // Capped at the TTL: a reply or ping stamps lastAt with a fresher clock than
+  // the drawing's `now`, which would otherwise read as 103% and "61m left of 60m".
+  const remainingMs = Math.max(0, Math.min(ttl, cache.lastAt + ttl - now))
   const warmth = ttl > 0 ? remainingMs / ttl : 0
   const state: CacheState = warmth <= 0 ? 'cold' : warmth > 0.25 ? 'warm' : 'cooling'
   const short = ttl < 10 * 60_000
