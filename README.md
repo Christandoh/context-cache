@@ -10,7 +10,7 @@ A Claude Code mod that puts your context window, your usage limits and your prom
 
 ![The panel in the desktop app, live data](docs/wide-real.png)
 
-That's a real session. 484k of a 1M context window, the session limit at 34% with 54% of its five hours gone, the weekly and Fable limits, and a prompt cache that is warm with 59 minutes left. The notice at the bottom says what the next message will cost you, with the buttons beside it. This screenshot predates 0.1.5: it still shows a Later button, and the Warm button came in 0.1.6. The drawn cards below show the current row.
+That's a real session. 315k of a 1M context window, the session limit at 10% with 39% of its five hours gone, the weekly limit at 75% with 71% of its week gone, Fable at 22%, and a prompt cache that is fully warm with 60 minutes left and every token of the last reply read from it. The notice at the bottom says what the next message will cost you, with Clear, Compact and Warm beside it.
 
 ## Why
 
