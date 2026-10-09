@@ -10,7 +10,7 @@ A Claude Code mod that puts your context window, your usage limits and your prom
 
 ![The panel in the desktop app, live data](docs/wide-real.png)
 
-That's a real session. 484k of a 1M context window, the session limit at 34% with 54% of its five hours gone, the weekly and Fable limits, and a prompt cache that is warm with 59 minutes left. The notice at the bottom says what the next message will cost you, with Clear and Compact beside it. This screenshot predates 0.1.5 and still shows a Later button.
+That's a real session. 484k of a 1M context window, the session limit at 34% with 54% of its five hours gone, the weekly and Fable limits, and a prompt cache that is warm with 59 minutes left. The notice at the bottom says what the next message will cost you, with the buttons beside it. This screenshot predates 0.1.5: it still shows a Later button, and the Warm button came in 0.1.6. The drawn cards below show the current row.
 
 ## Why
 
@@ -26,13 +26,17 @@ The top row is the context window. Tokens used out of the window, in four groups
 
 The middle row is three limits and the cache. Current session (5 hours), Weekly (7 days) and Fable (the model-specific weekly window), each with the double bar described above, the two percentages and the reset time. Then the cache. Warm, Cooling or Cold, a temperature bar, how warm it is as a percentage of its time-to-live, the last reply's cache hit rate, and minutes left.
 
-The bottom row is a one-line notice about the cache with two buttons. Clear runs `/clear`. Compact compacts the conversation. The row never hides, whatever the cache holds, so the buttons are always there. With nothing cached yet, in a fresh session or after `/clear` or a compaction, it says how much the next message will write to the cache.
+The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation.
+
+Warm (new in 0.1.6) keeps the cache from going cold while you're away: 55 minutes after the last reply it sends a hidden one-line ping over the conversation, which reads the cache (a tenth of the price) and resets its hour. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache; with the 5-minute cache, pinging that often would cost more than letting it go cold.
+
+The row never hides, whatever the cache holds, so the buttons are always there. With nothing cached yet, in a fresh session or after `/clear` or a compaction, it says how much the next message will write to the cache.
 
 ![900 px, nothing cached yet](docs/empty-900.png)
 
 ## Four widths
 
-The card re-lays itself as the window changes. Columns down to about 500 px, rings below that, and the legend drops at about 360 px. All four were drawn first in a design file and the panel reproduces them to the pixel.
+The card re-lays itself as the window changes. Columns down to about 500 px, rings below that, and the legend drops at about 360 px. On the rings the notice switches to a shorter wording so it stays on one line. All four were drawn first in a design file and the panel reproduces them to the pixel.
 
 ![900 px, a cooling cache](docs/wide-900.png)
 

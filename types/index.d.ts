@@ -59,6 +59,8 @@ declare module 'claude-code' {
       now: number
       /** Desktop/mobile: CSS px per host cell, to draw the design at its real px size (/cache scale). */
       pxPerCell: number
+      /** Keep-warm: when it switches itself off, epoch milliseconds; null while off. */
+      warmUntil: number | null
     }
   }
 }

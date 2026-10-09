@@ -19,6 +19,9 @@ import {
   buildContext,
   buildView,
   cacheView,
+  isNarrow,
+  fmtClock,
+  fmtTokens,
   noticeText,
   pct,
   type ViewModel,
@@ -39,6 +42,17 @@ const nowAtom = atom({ plugin: 'context-cache', key: 'now' } as const, 0)
 // /cache scale <px> adjusts it and the value is kept across sessions.
 const pxPerCellAtom = atom({ plugin: 'context-cache', key: 'pxPerCell' } as const, 8)
 const DEFAULT_PX_PER_CELL = 8
+const warmUntilAtom = atom({ plugin: 'context-cache', key: 'warmUntil' } as const, null)
+
+// Keep-warm: a cache read resets the 1h TTL for free, so one tool-less fork of
+// the main thread 55 min after the last reply keeps it alive at ~0.1x of the
+// context per ping (a cold rewrite is 2x). The fork never enters the transcript.
+const WARM_AFTER_MS = 55 * 60_000
+const WARM_FOR_MS = 8 * 60 * 60_000
+const WARM_PROMPT = 'Keep-alive ping for the prompt cache. Reply with only: ok'
+let warmInFlight = false
+/** The last successful ping of this warming run, for the notice line. */
+let lastPing: { at: number; read: number } | null = null
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 // The account endpoint answers 429 to anyone who leans on it; the status-line
@@ -112,12 +126,17 @@ async function statusReport($: EngineInterface): Promise<string> {
   } catch {
     surfaces = []
   }
-  const [snap, hidden, pxPerCell] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom), read($, pxPerCellAtom)])
-  const drawn = Object.entries(draws).map(([k, n]) => `${k} ×${n}`).join(', ') || 'nothing yet'
+  const [snap, hidden, pxPerCell, warmUntil] = await Promise.all([
+    read($, snapshotAtom),
+    read($, hiddenAtom),
+    read($, pxPerCellAtom),
+    read($, warmUntilAtom),
+  ])
+  const drawn = Object.entries(draws).map(([k, n]) => `${k} Ã—${n}`).join(', ') || 'nothing yet'
   const a = lastAccount
   const account = a
-    ? `auth ${a.authKind}, HTTP ${a.status ?? '—'}${a.ok === false ? ' (not ok)' : ''}` +
-      `${a.error ? `, error: ${a.error}` : ''}; keys: ${a.topLevelKeys.join(', ') || '—'}; ` +
+    ? `auth ${a.authKind}, HTTP ${a.status ?? 'â€”'}${a.ok === false ? ' (not ok)' : ''}` +
+      `${a.error ? `, error: ${a.error}` : ''}; keys: ${a.topLevelKeys.join(', ') || 'â€”'}; ` +
       `windows: ${a.windows.join(', ') || 'none'}; Fable matched: ${a.fableMatched.join(', ') || 'none'}`
     : 'not attempted yet'
   const lines = [
@@ -129,6 +148,7 @@ async function statusReport($: EngineInterface): Promise<string> {
     `Limits: ${snap?.limits.length ? snap.limits.map(l => `${l.kind} ${l.usage}%`).join(', ') : 'none'} (source: ${snap?.limitsSource ?? 'none'})`,
     `Account usage request: ${account}`,
     `Cache: last write ${snap?.cache.lastAt ? new Date(snap.cache.lastAt).toISOString() : 'none'}, TTL ${snap ? snap.cache.ttlMs / 60000 : '?'}m${snap?.cache.isTtlKnown ? '' : ' (default)'}`,
+    `Warming: ${warmUntil === null ? 'off' : `on until ${fmtClock(warmUntil)}; ${snap ? (await warmNote($, snap)) || 'no note' : 'no snapshot'}`}`,
     `Full report: ${cwd ? `${cwd}/` : ''}${DIAG_FILE}`,
   ]
   const text = lines.join('\n')
@@ -334,7 +354,7 @@ async function hasMobile($: EngineInterface): Promise<boolean> {
   }
 }
 
-/** The card's inner width in CSS px on a remote surface: the band's cells × px per cell, less the border. */
+/** The card's inner width in CSS px on a remote surface: the band's cells Ã— px per cell, less the border. */
 async function widthPx($: EngineInterface, columns: number): Promise<number> {
   return columns * (await read($, pxPerCellAtom)) - 2
 }
@@ -348,12 +368,83 @@ function designCells(px: number): number {
 async function panelModel($: EngineInterface, columns: number, maxRows: number): Promise<ViewModel | null> {
   const [snap, hidden, tick] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom), read($, nowAtom)])
   if (hidden || !snap) return null
-  return buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows)
+  const vm = buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows)
+  const warm = await warmNote($, snap, isNarrow(vm.size))
+  return warm ? { ...vm, notice: warm } : vm
 }
 
-/** Clear and Compact. Neither hides the notice row: it stays on whatever the cache holds. */
-function actionsFor($: EngineInterface, isWorking: boolean): Actions {
+/** While warming, the notice line in place of the usual one, kept as short: the last ping and the next. */
+async function warmNote($: EngineInterface, { cache, context }: ContextCacheSnapshot, short = false): Promise<string> {
+  if ((await read($, warmUntilAtom)) === null || cache.lastAt === null) return ''
+  const next = fmtClock(cache.lastAt + WARM_AFTER_MS)
+  if (short) return lastPing ? `Warmed ${fmtClock(lastPing.at)}, next ${next}.` : `Kept warm: next ping ${next}.`
+  return lastPing
+    ? `Kept warm at ${fmtClock(lastPing.at)}, reuses ${fmtTokens(lastPing.read)}. Next ${next}.`
+    : `Kept warm: next message reuses ${context ? fmtTokens(context.used) : "the cache"}. Ping at ${next}.`
+}
+
+/** Why the cache can't be kept warm now, or null when it can. */
+function whyNoWarm(cache: ContextCacheCache, now: number): string | null {
+  if (cache.ttlMs !== TTL_1H) return 'this session uses the 5-minute cache; pinging every few minutes costs more than letting it go cold'
+  if (cache.lastAt === null) return 'nothing is cached yet'
+  if (now - cache.lastAt >= cache.ttlMs) return 'the cache has already gone cold'
+  return null
+}
+
+async function stopWarm($: EngineInterface, why: string) {
+  await update($, warmUntilAtom, () => null)
+  $.ui.toast(`Warming stopped: ${why}.`)
+}
+
+/** Checked every 15s while warming: pings once the cache is 55 min old. */
+async function warmTick($: EngineInterface) {
+  const until = await read($, warmUntilAtom)
+  if (until === null || warmInFlight) return
+  const now = await $.clock.now()
+  const { cache } = await current($)
+  if (now >= until) return stopWarm($, 'it ran for 8 hours')
+  const why = whyNoWarm(cache, now)
+  if (why) return stopWarm($, why)
+  if (now - cache.lastAt! < WARM_AFTER_MS) return
+  warmInFlight = true
+  try {
+    const r = await $.model.fork({ prompt: WARM_PROMPT })
+    if (!r.isAnswered && r.reason === 'nothing-to-fork') return stopWarm($, 'nothing is cached yet')
+    const u = 'usage' in r ? r.usage : undefined
+    if (u && u.cache_read_input_tokens > 0) {
+      const at = await $.clock.now()
+      lastPing = { at, read: u.cache_read_input_tokens }
+      await patchCache($, { lastAt: at })
+      $.ui.toast(`Kept the cache warm at ${fmtClock(at)} (read ${fmtTokens(u.cache_read_input_tokens)} from cache). Next ping ${fmtClock(at + WARM_AFTER_MS)}.`)
+    }
+    else if (u && u.cache_creation_input_tokens > 0) await stopWarm($, 'the ping missed the cache and rewrote it')
+    // else an API error: the next tick retries while the cache is still warm
+  } finally {
+    warmInFlight = false
+  }
+}
+
+/** Clear, Compact and Warm/Stop. None hides the notice row: it stays on whatever the cache holds. */
+async function actionsFor($: EngineInterface, isWorking: boolean): Promise<Actions> {
+  const isWarming = (await read($, warmUntilAtom)) !== null
   return {
+    isWarming,
+    warm: async () => {
+      if ((await read($, warmUntilAtom)) !== null) {
+        await update($, warmUntilAtom, () => null)
+        $.ui.toast('Warming stopped.')
+        return
+      }
+      const now = await $.clock.now()
+      const why = whyNoWarm((await current($)).cache, now)
+      if (why) {
+        $.ui.toast(`Can't warm: ${why}.`)
+        return
+      }
+      lastPing = null
+      await update($, warmUntilAtom, () => now + WARM_FOR_MS)
+      $.ui.toast(`Keeping the cache warm: a hidden ping ${WARM_AFTER_MS / 60_000} min after the last reply, for up to 8 hours. Press Stop to end it.`)
+    },
     clear: async () => {
       if (isWorking) $.ui.toast('Clear runs once the current turn finishes.')
       try {
@@ -362,25 +453,21 @@ function actionsFor($: EngineInterface, isWorking: boolean): Actions {
         $.ui.toast('Could not run /clear right now.')
       }
     },
+    // Queued like Clear: $.session.compact() rejects whenever the engine is not idle.
+    // Our session.compact hook resets the cache once it runs.
     compact: async () => {
+      if (isWorking) $.ui.toast('Compact runs once the current turn finishes.')
       try {
-        const r = await $.session.compact()
-        if ('skip' in r) {
-          $.ui.toast('Compaction was skipped.')
-        } else {
-          // Our own session.compact hook does not see our own call: reset here.
-          await patchCache($, { lastAt: null, hitRate: null })
-          void refresh($)
-        }
-      } catch {
-        $.ui.toast('Compact runs between turns: try again when this one finishes.')
+        await $.command.run({ command: 'compact' })
+      } catch (err) {
+        $.ui.toast(`Could not run /compact: ${err instanceof Error ? err.message : String(err)}`)
       }
     },
   }
 }
 
 export const register: Register = on => {
-  // ── Session lifecycle ──────────────────────────────────────────────────
+  // â”€â”€ Session lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   on('session.start', async ($, e, next) => {
     cwd = e.cwd
@@ -410,6 +497,7 @@ export const register: Register = on => {
       })().catch(() => undefined)
     })
     $.clock.every(ACCOUNT_EVERY_MS, () => void refresh($, false))
+    $.clock.every(15_000, () => void warmTick($).catch(() => undefined))
     return next(e)
   })
 
@@ -457,6 +545,16 @@ export const register: Register = on => {
     return result
   })
 
+  // You're back: your own message keeps the cache warm from here, so warming stops.
+  // turn.start, not prompt.submit: the desktop app's messages skip prompt.submit.
+  on('turn.start', async ($, e, next) => {
+    if (!warmInFlight && (await read($, warmUntilAtom)) !== null) {
+      await update($, warmUntilAtom, () => null)
+      $.ui.toast('Welcome back: warming stopped.')
+    }
+    return next(e)
+  }).catch((_$, e, next) => next(e))
+
   // After each turn, read which TTL the responses were cached with.
   on('classic.Stop', ($, e, next) => {
     void learnTtl($, e.transcript_path)
@@ -497,7 +595,7 @@ export const register: Register = on => {
     return result
   })
 
-  // ── /cache, /cache-status, /cache-pane, /cache-refresh, /cache-scale ────
+  // â”€â”€ /cache, /cache-status, /cache-pane, /cache-refresh, /cache-scale â”€â”€â”€â”€
 
   on('command.run', { command: 'cache-status' }, async $ => ({ text: await statusReport($) }))
 
@@ -509,7 +607,7 @@ export const register: Register = on => {
   on('command.run', { command: 'cache-scale' }, async ($, e) => {
     const was = await read($, pxPerCellAtom)
     const typed = Number(e.args.trim())
-    // No number typed (or none delivered): step through 7 … 9.5 and round.
+    // No number typed (or none delivered): step through 7 â€¦ 9.5 and round.
     const n = Number.isFinite(typed) && typed > 0 ? typed : was >= 9.5 ? 7 : Math.round((was + 0.5) * 2) / 2
     await $.store.set('pxPerCell', n)
     await update($, pxPerCellAtom, () => n)
@@ -546,7 +644,7 @@ export const register: Register = on => {
     return result
   })
 
-  // ── The band above the prompt (terminal, desktop) ──────────────────────
+  // â”€â”€ The band above the prompt (terminal, desktop) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     noteDraw('AbovePrompt', e.surface)
@@ -556,18 +654,18 @@ export const register: Register = on => {
     if (e.surface === 'terminal') {
       const vm = await panelModel($, e.props.bodyColumns, e.props.maxRows)
       if (!vm) return next(e)
-      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, actionsFor($, e.props.isWorking))
+      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, (await actionsFor($, e.props.isWorking)))
     }
     if (e.surface === 'desktop' || e.surface === 'vscode') {
       const px = await widthPx($, e.props.bodyColumns)
       const vm = await panelModel($, designCells(px), e.props.maxRows)
       if (!vm) return next(e)
-      return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, actionsFor($, e.props.isWorking))
+      return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, (await actionsFor($, e.props.isWorking)))
     }
     return next(e)
   })
 
-  // ── The same panel as a pane (every surface; the phone's way to see it) ─
+  // â”€â”€ The same panel as a pane (every surface; the phone's way to see it) â”€
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     noteDraw('Pane', e.surface)
@@ -576,12 +674,12 @@ export const register: Register = on => {
     const rows = Math.max(e.props.scroll.bodyRows, 12)
     if (e.surface === 'terminal') {
       const vm = await panelModel($, e.props.bodyColumns, rows)
-      if (!vm) return <Text dimColor>Reading usage…</Text>
-      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, actionsFor($, false))
+      if (!vm) return <Text dimColor>Reading usageâ€¦</Text>
+      return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, (await actionsFor($, false)))
     }
     const px = await widthPx($, e.props.bodyColumns)
     const vm = await panelModel($, designCells(px), rows)
-    if (!vm) return <Text dimColor>Reading usage…</Text>
-    return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, actionsFor($, false))
+    if (!vm) return <Text dimColor>Reading usageâ€¦</Text>
+    return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, (await actionsFor($, false)))
   })
 }

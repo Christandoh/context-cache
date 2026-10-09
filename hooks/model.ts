@@ -109,11 +109,15 @@ export function fmtReset(resetsAt: number | null, now: number): string {
   const left = resetsAt - now
   if (left <= 0) return 'Resetting now'
   if (left < 24 * HOUR) return `Resets in ${fmtSpan(left)}`
-  const d = new Date(resetsAt)
+  return `Resets ${DAYS[new Date(resetsAt).getDay()]} ${fmtClock(resetsAt)}`
+}
+
+/** "11:05 pm" (local time). */
+export function fmtClock(at: number): string {
+  const d = new Date(at)
   const h24 = d.getHours()
   const h12 = h24 % 12 === 0 ? 12 : h24 % 12
-  const mm = String(d.getMinutes()).padStart(2, '0')
-  return `Resets ${DAYS[d.getDay()]} ${h12}:${mm} ${h24 < 12 ? 'am' : 'pm'}`
+  return `${h12}:${String(d.getMinutes()).padStart(2, '0')} ${h24 < 12 ? 'am' : 'pm'}`
 }
 
 // ── Context ────────────────────────────────────────────────────────────────
@@ -366,25 +370,33 @@ export function cacheView(cache: ContextCacheCache, now: number): CacheView {
   }
 }
 
-/** The notice line's copy. Always a line: the row with Clear / Compact never hides. */
-export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number): string {
+/**
+ * The notice line's copy. Always a line: the row with Clear / Compact never hides.
+ * `short`: the narrow (ring) layouts' wording, short enough to stay on one line.
+ */
+export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number, short = false): string {
   if (!context) return cache.state === 'empty' ? 'Cache empty: nothing cached yet.' : `Cache ${cache.label.toLowerCase()}: reading context size…`
   const tokens = fmtTokens(context.used)
-  if (cache.state === 'empty') return `Cache empty: next message writes ${tokens} to cache.`
+  if (cache.state === 'empty') return short ? `Cache empty: writes ${tokens}.` : `Cache empty: next message writes ${tokens} to cache.`
   if (cache.state === 'warm') {
     const usedPct = (context.used / context.window) * 100
     if (context.autoCompactAt !== null && usedPct >= 85) {
       const away = Math.max(0, pct((context.autoCompactAt / context.window) * 100 - usedPct))
-      return `Cache warm: next message reuses ${tokens}. Auto-compact is ${away}% away.`
+      return short ? `Warm: reuses ${tokens}. Compact ${away}% away.` : `Cache warm: next message reuses ${tokens}. Auto-compact is ${away}% away.`
     }
-    return `Cache warm: next message reuses ${tokens} from cache.`
+    return short ? `Cache warm: reuses ${tokens}.` : `Cache warm: next message reuses ${tokens} from cache.`
   }
   if (cache.state === 'cooling') {
     const within =
       ttlMs < 10 * 60_000 ? fmtSpan(cache.remainingMs, true) : `${Math.max(1, Math.round(cache.remainingMs / 60_000))}m`
-    return `Cache cooling: send within ${within} to keep ${tokens} cached.`
+    return short ? `Cooling: send within ${within}.` : `Cache cooling: send within ${within} to keep ${tokens} cached.`
   }
-  return `Cache cold: next message re-reads ${tokens}. Clear is free.`
+  return short ? `Cache cold: re-reads ${tokens}.` : `Cache cold: next message re-reads ${tokens}. Clear is free.`
+}
+
+/** Narrow layouts (rings) take the short notice wording. */
+export function isNarrow(size: SizeClass): boolean {
+  return size === 'c' || size === 'd'
 }
 
 // ── Layout ─────────────────────────────────────────────────────────────────
@@ -437,11 +449,11 @@ export function buildView(
 ): ViewModel {
   let size = sizeClassOf(columns)
   const cache = cacheView(snap.cache, now)
-  const notice = noticeText(cache, snap.context, snap.cache.ttlMs)
   // Fall back to a shorter layout when the band has fewer rows than it needs.
   while (size !== 'd' && rowsFor(size, true) > maxRows) {
     size = size === 'a' ? 'c' : size === 'b' ? 'c' : 'd'
   }
+  const notice = noticeText(cache, snap.context, snap.cache.ttlMs, isNarrow(size))
 
   const ctx = snap.context
   const context = ctx

@@ -10,6 +10,9 @@ import { panelSvg } from './panel-svg'
 export type Actions = {
   clear: () => void | Promise<void>
   compact: () => void | Promise<void>
+  /** Starts keep-warm, or stops it while on. */
+  warm: () => void | Promise<void>
+  isWarming: boolean
 }
 
 type TermEls = Elements['terminal']
@@ -223,6 +226,7 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
     <Box flexDirection="row" columnGap={1}>
       <Button key="clear" label="Clear" variant="primary" hotkey="c" onPress={actions.clear} />
       <Button key="compact" label="Compact" hotkey="k" onPress={actions.compact} />
+      <Button key="warm" label={actions.isWarming ? 'Stop' : 'Warm'} hotkey="w" onPress={actions.warm} />
     </Box>
   )
   const notice = vm.notice
@@ -277,13 +281,14 @@ export function renderDesktop(E: DeskEls, vm: ViewModel, widthPx: number, action
   const p = panelSvg(vm, Math.max(240, widthPx))
   const wide = p.size === 'a' || p.size === 'b'
   const padX = p.size === 'd' ? 1 : 2
-  const button = (key: 'clear' | 'compact', label: string, hotkey: string, extra: Record<string, unknown>) => (
+  const button = (key: 'clear' | 'compact' | 'warm', label: string, hotkey: string, extra: Record<string, unknown>) => (
     <Button key={key} label={label} hotkey={hotkey} onPress={actions[key]} {...extra} />
   )
   const buttons = (
     <Box flexDirection="row" columnGap={1}>
       {button('clear', 'Clear', 'c', { variant: 'primary' })}
       {button('compact', 'Compact', 'k', {})}
+      {button('warm', actions.isWarming ? 'Stop' : 'Warm', 'w', {})}
     </Box>
   )
   let actionsRow = null
