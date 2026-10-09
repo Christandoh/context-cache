@@ -19,7 +19,7 @@ import {
   buildContext,
   buildView,
   cacheView,
-  isNarrow,
+  isShortNotice,
   fmtClock,
   fmtTokens,
   noticeText,
@@ -369,7 +369,7 @@ async function panelModel($: EngineInterface, columns: number, maxRows: number):
   const [snap, hidden, tick] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom), read($, nowAtom)])
   if (hidden || !snap) return null
   const vm = buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows)
-  const warm = await warmNote($, snap, isNarrow(vm.size))
+  const warm = await warmNote($, snap, isShortNotice(vm.size))
   return warm ? { ...vm, notice: warm } : vm
 }
 

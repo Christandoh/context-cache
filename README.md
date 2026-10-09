@@ -18,33 +18,31 @@ Claude Code already tells you all of this, in three places. `/context` has the w
 
 The cache matters more than it looks. Every reply re-sends the whole conversation. With the cache warm, 98% of that is served from memory at a tenth of the price. Let it go cold, by walking away for an hour, and the next message pays full price to re-read everything. The panel counts that down and tells you before it happens.
 
-The limits matter too, and in a particular way. Being at 60% of your weekly allowance is fine on Saturday and a problem on Tuesday. So each limit bar carries two layers. The dark one is how much of the window's time has passed, the bright one is how much you've used, and a white tick marks where time is. If the bright bar is past the tick you're ahead of pace, and the bar turns amber. At 90% it turns red.
+A limit's percentage alone can mislead. Being at 60% of your weekly allowance is fine on Saturday and a problem on Tuesday. So each limit bar carries two layers. The dark one is how much of the window's time has passed, the bright one is how much you've used, and a white tick marks where time is. If the bright bar is past the tick you're ahead of pace, and the bar turns amber. At 90% it turns red.
 
 ## What's on the card
 
-The top row is the context window. Tokens used out of the window, in four groups (System, Tools, Files, Messages) with a legend under the bar and a tick where auto-compact will fire.
+The top row is the context window. Tokens used out of the window, split into System, Tools, Files and Messages, with a legend under the bar and a tick where auto-compact will fire.
 
-The middle row is three limits and the cache. Current session (5 hours), Weekly (7 days) and Fable (the model-specific weekly window), each with the double bar described above, the two percentages and the reset time. Then the cache. Warm, Cooling or Cold, a temperature bar, how warm it is as a percentage of its time-to-live, the last reply's cache hit rate, and minutes left.
+The middle row is three limits and the cache. Current session is the 5-hour window, Weekly the 7-day one, and Fable the model-specific weekly window. Each has the double bar described above, the two percentages and the reset time. Then the cache. Warm, Cooling or Cold, a temperature bar, how warm it is as a percentage of its time-to-live, the last reply's cache hit rate, and minutes left.
 
 The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation.
 
-Warm (new in 0.1.6) keeps the cache from going cold while you're away: 55 minutes after the last reply it sends a hidden one-line ping over the conversation, which reads the cache (a tenth of the price) and resets its hour. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache; with the 5-minute cache, pinging that often would cost more than letting it go cold.
+Warm, new in 0.1.6, keeps the cache from going cold while you're away. 55 minutes after the last reply it sends a hidden one-line ping over the conversation. The ping reads the cache at a tenth of the price and resets its hour, so it costs about a twentieth of a cold re-read. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache. With the 5-minute cache, pinging that often would cost more than letting it go cold.
 
 The row never hides, whatever the cache holds, so the buttons are always there. With nothing cached yet, in a fresh session or after `/clear` or a compaction, it says how much the next message will write to the cache.
 
-![900 px, nothing cached yet](docs/empty-900.png)
+![900 px, nothing cached yet, drawn from the mod's layout code](docs/empty-900.png)
 
 ## Four widths
 
-The card re-lays itself as the window changes. Columns down to about 500 px, rings below that, and the legend drops at about 360 px. On the rings the notice switches to a shorter wording so it stays on one line. All four were drawn first in a design file and the panel reproduces them to the pixel.
+The card re-lays itself as the window changes. Columns down to about 500 px, rings below that, and the legend drops at about 360 px. Below the widest layout the notice switches to a shorter wording, so it stays on one line. The widest layout is the screenshot at the top. These are the other three, from the same live session.
 
-![900 px, a cooling cache](docs/wide-900.png)
+![About 620 px, columns](docs/medium-real.png)
 
-![620 px, two limits in the red and an auto-compact warning](docs/medium-620.png)
+![About 420 px, rings with the legend](docs/narrow-real.png)
 
-![420 px, rings](docs/narrow-420.png)
-
-![320 px, a cold cache](docs/phone-320.png)
+![About 320 px, rings without the legend](docs/phone-real.png)
 
 ## Install
 
@@ -63,7 +61,7 @@ Two limits of the platform worth knowing. The desktop app's ordinary chat has no
 
 `/cache` hides or shows the card.
 
-`/cache-status` prints a diagnostics report. Which apps are attached, what the mod has drawn, where each figure came from, and how the last account usage request went (auth kind, HTTP status, the windows in the response and which one matched Fable). The full report also lands in `context-cache-status.json` in the session's working directory.
+`/cache-status` prints a diagnostics report. It lists which apps are attached, what the mod has drawn, where each figure came from, whether warming is on, and how the last account usage request went, down to the HTTP status and which window matched Fable. The full report also lands in `context-cache-status.json` in the session's working directory.
 
 `/cache-pane` opens the card as a pane, on any device.
 
@@ -75,7 +73,7 @@ These are five separate commands rather than one with arguments because the desk
 
 ## Where the numbers come from
 
-Every figure has a named source. One is worked out rather than reported: Files is the share of the conversation that is `Read` output, by character count, because Claude Code folds file reads into Messages.
+Every figure has a named source. One is worked out rather than reported. Files is the share of the conversation that is `Read` output, by character count, because Claude Code folds file reads into Messages.
 
 | Figure | Source |
 |---|---|

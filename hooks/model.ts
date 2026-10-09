@@ -374,7 +374,7 @@ export function cacheView(cache: ContextCacheCache, now: number): CacheView {
 
 /**
  * The notice line's copy. Always a line: the row with Clear / Compact never hides.
- * `short`: the narrow (ring) layouts' wording, short enough to stay on one line.
+ * `short`: the wording for every layout below the widest, short enough to stay on one line.
  */
 export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number, short = false): string {
   if (!context) return cache.state === 'empty' ? 'Cache empty: nothing cached yet.' : `Cache ${cache.label.toLowerCase()}: reading context size…`
@@ -396,9 +396,9 @@ export function noticeText(cache: CacheView, context: ContextCacheContext | null
   return short ? `Cache cold: re-reads ${tokens}.` : `Cache cold: next message re-reads ${tokens}. Clear is free.`
 }
 
-/** Narrow layouts (rings) take the short notice wording. */
-export function isNarrow(size: SizeClass): boolean {
-  return size === 'c' || size === 'd'
+/** Every layout below the widest takes the short notice wording: beside three buttons the full sentence wraps from about 620px down. */
+export function isShortNotice(size: SizeClass): boolean {
+  return size !== 'a'
 }
 
 // ── Layout ─────────────────────────────────────────────────────────────────
@@ -455,7 +455,7 @@ export function buildView(
   while (size !== 'd' && rowsFor(size, true) > maxRows) {
     size = size === 'a' ? 'c' : size === 'b' ? 'c' : 'd'
   }
-  const notice = noticeText(cache, snap.context, snap.cache.ttlMs, isNarrow(size))
+  const notice = noticeText(cache, snap.context, snap.cache.ttlMs, isShortNotice(size))
 
   const ctx = snap.context
   const context = ctx
