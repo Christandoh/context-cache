@@ -77,6 +77,11 @@ function fitRuns(runs: Run[], size: number, max: number): Run[] {
   return out
 }
 
+/** The first wording that fits `max` px whole; the shortest, cut, when none does. */
+function fitFirst(options: Run[][], size: number, max: number): Run[] {
+  return options.find(o => runsWidth(o, size) <= max) ?? fitRuns(options[options.length - 1]!, size, max)
+}
+
 /** A rounded 8px bar track, clipped, with whatever is drawn inside. */
 function bar(id: string, x: number, y: number, w: number, inner: string, track: string = TOKENS.track): string {
   return (
@@ -300,16 +305,19 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
       yy += lh(ts) + 5
       out += limitBar(id(), l, x, yy, colW)
       yy += 8 + 5
-      const usage: Run[] =
+      // Narrow columns drop the words before the numbers rather than cut the time off.
+      const usage = (u: string, t: string): Run[] => [
+        { text: `${u}${pct(l.usage!)}% · `, color: TOKENS.text },
+        { text: l.time === null ? '' : `${t}${pct(l.time)}%`, color: TOKENS.text3 },
+      ]
+      const usageRuns =
         l.usage === null
           ? [{ text: 'No data', color: TOKENS.text4 }]
-          : [
-              { text: `Usage ${pct(l.usage)}% · `, color: TOKENS.text },
-              { text: l.time === null ? '' : `Time ${pct(l.time)}%`, color: TOKENS.text3 },
-            ]
-      out += line(x, yy, 11.5, fitRuns(usage, 11.5, colW), 'start', clip)
+          : fitFirst([usage('Usage ', 'Time '), usage('', 'Time '), usage('', 'T ')], 11.5, colW)
+      out += line(x, yy, 11.5, usageRuns, 'start', clip)
       yy += lh(11.5) + 5
-      out += line(x, yy, 11.5, fitRuns([{ text: l.reset, color: TOKENS.text4 }], 11.5, colW), 'start', clip)
+      const reset = (t: string): Run[] => [{ text: t, color: TOKENS.text4 }]
+      out += line(x, yy, 11.5, fitFirst([reset(l.reset), reset(l.reset.replace(/^Resets (in )?/, ''))], 11.5, colW), 'start', clip)
     })
     {
       const x = col(3)
@@ -334,11 +342,11 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
       yy += lh(ts) + 5
       out += tempBar(id(), c, x, yy, colW)
       yy += 8 + 5
-      const warm: Run[] = [
-        { text: c.state === 'empty' ? 'Warmth — · ' : `Warmth ${pct(c.warmth * 100)}% · `, color: TOKENS.text },
-        { text: `Hit ${c.hit === null ? '—' : `${pct(c.hit)}%`}`, color: TOKENS.text3 },
+      const warm = (w: string, h: string): Run[] => [
+        { text: `${w}${c.state === 'empty' ? '—' : `${pct(c.warmth * 100)}%`} · `, color: TOKENS.text },
+        { text: `${h}${c.hit === null ? '—' : `${pct(c.hit)}%`}`, color: TOKENS.text3 },
       ]
-      out += line(x, yy, 11.5, fitRuns(warm, 11.5, colW), 'start', clip)
+      out += line(x, yy, 11.5, fitFirst([warm('Warmth ', 'Hit '), warm('', 'Hit ')], 11.5, colW), 'start', clip)
       yy += lh(11.5) + 5
       out += line(x, yy, 11.5, fitRuns([{ text: c.detail, color: TOKENS.text4 }], 11.5, colW), 'start', clip)
     }

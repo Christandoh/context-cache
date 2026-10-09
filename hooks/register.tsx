@@ -132,11 +132,11 @@ async function statusReport($: EngineInterface): Promise<string> {
     read($, pxPerCellAtom),
     read($, warmUntilAtom),
   ])
-  const drawn = Object.entries(draws).map(([k, n]) => `${k} Ã—${n}`).join(', ') || 'nothing yet'
+  const drawn = Object.entries(draws).map(([k, n]) => `${k} ×${n}`).join(', ') || 'nothing yet'
   const a = lastAccount
   const account = a
-    ? `auth ${a.authKind}, HTTP ${a.status ?? 'â€”'}${a.ok === false ? ' (not ok)' : ''}` +
-      `${a.error ? `, error: ${a.error}` : ''}; keys: ${a.topLevelKeys.join(', ') || 'â€”'}; ` +
+    ? `auth ${a.authKind}, HTTP ${a.status ?? '—'}${a.ok === false ? ' (not ok)' : ''}` +
+      `${a.error ? `, error: ${a.error}` : ''}; keys: ${a.topLevelKeys.join(', ') || '—'}; ` +
       `windows: ${a.windows.join(', ') || 'none'}; Fable matched: ${a.fableMatched.join(', ') || 'none'}`
     : 'not attempted yet'
   const lines = [
@@ -354,7 +354,7 @@ async function hasMobile($: EngineInterface): Promise<boolean> {
   }
 }
 
-/** The card's inner width in CSS px on a remote surface: the band's cells Ã— px per cell, less the border. */
+/** The card's inner width in CSS px on a remote surface: the band's cells × px per cell, less the border. */
 async function widthPx($: EngineInterface, columns: number): Promise<number> {
   return columns * (await read($, pxPerCellAtom)) - 2
 }
@@ -467,7 +467,7 @@ async function actionsFor($: EngineInterface, isWorking: boolean): Promise<Actio
 }
 
 export const register: Register = on => {
-  // â”€â”€ Session lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Session lifecycle ──────────────────────────────────────────────────
 
   on('session.start', async ($, e, next) => {
     cwd = e.cwd
@@ -595,7 +595,7 @@ export const register: Register = on => {
     return result
   })
 
-  // â”€â”€ /cache, /cache-status, /cache-pane, /cache-refresh, /cache-scale â”€â”€â”€â”€
+  // ── /cache, /cache-status, /cache-pane, /cache-refresh, /cache-scale ────
 
   on('command.run', { command: 'cache-status' }, async $ => ({ text: await statusReport($) }))
 
@@ -607,7 +607,7 @@ export const register: Register = on => {
   on('command.run', { command: 'cache-scale' }, async ($, e) => {
     const was = await read($, pxPerCellAtom)
     const typed = Number(e.args.trim())
-    // No number typed (or none delivered): step through 7 â€¦ 9.5 and round.
+    // No number typed (or none delivered): step through 7 … 9.5 and round.
     const n = Number.isFinite(typed) && typed > 0 ? typed : was >= 9.5 ? 7 : Math.round((was + 0.5) * 2) / 2
     await $.store.set('pxPerCell', n)
     await update($, pxPerCellAtom, () => n)
@@ -644,7 +644,7 @@ export const register: Register = on => {
     return result
   })
 
-  // â”€â”€ The band above the prompt (terminal, desktop) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── The band above the prompt (terminal, desktop) ──────────────────────
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     noteDraw('AbovePrompt', e.surface)
@@ -665,7 +665,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // â”€â”€ The same panel as a pane (every surface; the phone's way to see it) â”€
+  // ── The same panel as a pane (every surface; the phone's way to see it) ─
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     noteDraw('Pane', e.surface)
@@ -674,12 +674,12 @@ export const register: Register = on => {
     const rows = Math.max(e.props.scroll.bodyRows, 12)
     if (e.surface === 'terminal') {
       const vm = await panelModel($, e.props.bodyColumns, rows)
-      if (!vm) return <Text dimColor>Reading usageâ€¦</Text>
+      if (!vm) return <Text dimColor>Reading usage…</Text>
       return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, (await actionsFor($, false)))
     }
     const px = await widthPx($, e.props.bodyColumns)
     const vm = await panelModel($, designCells(px), rows)
-    if (!vm) return <Text dimColor>Reading usageâ€¦</Text>
+    if (!vm) return <Text dimColor>Reading usage…</Text>
     return renderDesktop(E as Parameters<typeof renderDesktop>[0], vm, px, (await actionsFor($, false)))
   })
 }
