@@ -198,9 +198,25 @@ async function setTtl($: EngineInterface, ttlMs: number) {
   await patchCache($, { ttlMs, isTtlKnown: true })
 }
 
+/** The last account reading any session saved, when it is newer than this session's own. */
+async function adoptShared($: EngineInterface) {
+  const saved = (await $.store.get('accountLimits')) as { at?: number; limits?: ContextCacheLimit[] } | undefined
+  if (saved?.limits?.length && typeof saved.at === 'number' && saved.at > accountAt) {
+    accountLimits = saved.limits
+    accountAt = saved.at
+  }
+}
+
+// Every open session shares one request: whoever asks first writes the time to
+// the store, and the others take the reading it saves instead of asking too.
+// ponytail: two sessions reading the claim in the same instant both ask; rare, and a 429 backs both off.
 async function fetchAccount($: EngineInterface, now: number, force: boolean) {
   if (accountInFlight) return
-  if (!force && now - accountAt < ACCOUNT_EVERY_MS) return
+  if (!force) {
+    const asked = await $.store.get('accountAskedAt')
+    if (typeof asked === 'number' && now - asked < ACCOUNT_EVERY_MS) return adoptShared($)
+  }
+  await $.store.set('accountAskedAt', now)
   accountInFlight = true
   const diag: AccountDiag = { at: now, authKind: 'none', status: null, ok: null, topLevelKeys: [], windows: [], fableMatched: [], bodyPreview: '', error: null }
   lastAccount = diag
@@ -217,8 +233,9 @@ async function fetchAccount($: EngineInterface, now: number, force: boolean) {
     diag.bodyPreview = res.text.slice(0, 2000)
     if (res.status === 429) {
       // Back off a whole interval (or what retry-after asks) before trying again.
+      // The claim moves on so that no session asks before then.
       const retry = Number(res.headers['retry-after'])
-      accountAt = now + (Number.isFinite(retry) && retry > 0 ? Math.max(0, retry * 1000 - ACCOUNT_EVERY_MS) : 0)
+      await $.store.set('accountAskedAt', now + (Number.isFinite(retry) && retry > 0 ? Math.max(0, retry * 1000 - ACCOUNT_EVERY_MS) : 0))
       return
     }
     if (!res.ok) return
@@ -545,7 +562,7 @@ export const register: Register = on => {
     if (typeof storedPx === 'number' && storedPx > 0) await update($, pxPerCellAtom, () => storedPx)
     const initial = await current($)
     await update($, snapshotAtom, prev => prev ?? initial)
-    void refresh($, true)
+    void refresh($)
     // Started from the phone: the pane is how the panel shows there.
     if (await hasMobile($)) void $.ui.open({ id: PANE, title: 'Context & cache' }).catch(() => undefined)
     // The countdown: checked once a second, redrawn only when a figure the
