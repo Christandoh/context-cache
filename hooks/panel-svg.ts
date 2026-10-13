@@ -30,6 +30,14 @@ const PAD: Record<DesignSize, { y: number; x: number }> = {
   d: { y: 10, x: 12 },
 }
 const ROW_GAP = 11
+/** The legend sits this much closer to the context row than ROW_GAP (Chris's preview, 2026-10-13); the rows below stay put. */
+const LEGEND_UP: Record<DesignSize, number> = { a: 4, b: 5, c: 1, d: 0 }
+/** Where the legend starts: under the context bar when wide, else this far in from the padding. */
+const LEGEND_IN_NARROW = 8
+/** The notice text starts this far after the dot's left edge: the 7px dot and a 5px gap. */
+const NOTICE_TEXT_X = 12
+/** The notice beside the buttons (wide) is a size up from the narrow one. */
+const noticeSize = (wide: boolean) => (wide ? 13.5 : 12.5)
 /** A design button: 12.5px text, 6px padding, a 1px border on Compact. */
 export const BUTTON_H = lhOf(12.5) + 12 + 2
 
@@ -236,19 +244,25 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
   // Row 1: Context
   const ctx = vm.context
   const h1 = lh(13)
+  let barX = pad.x
   if (ctx) {
     const right = ctx.compactPct === null ? `${pct((ctx.used / ctx.window) * 100)}%` : wide ? `Compact at ${ctx.compactPct}%` : `${ctx.compactPct}%`
     const cy = y + h1 / 2
     let x = pad.x
     out += line(x, cy - lh(13) / 2, 13, [{ text: 'Context', color: TOKENS.text, bold: true }])
     x += textWidth('Context', 13, true) + 10
-    const used = ctx.usedLabel
-    out += line(x, cy - lh(12.5) / 2, 12.5, [{ text: used, color: TOKENS.text3 }])
-    x += textWidth(used, 12.5) + 10
+    // "112k / 1M (11%)": the percentage stands out, bold and white.
+    const m = ctx.usedLabel.match(/^(.*\()(\d+%)(\))$/)
+    const used: Run[] = m
+      ? [{ text: m[1]!, color: TOKENS.text3 }, { text: m[2]!, color: TOKENS.strong, bold: true }, { text: m[3]!, color: TOKENS.text3 }]
+      : [{ text: ctx.usedLabel, color: TOKENS.text3 }]
+    out += line(x, cy - lh(12.5) / 2, 12.5, used)
+    x += runsWidth(used, 12.5) + 10
     const rightX = W - pad.x
     out += line(rightX, cy - lh(12.5) / 2, 12.5, [{ text: right, color: TOKENS.text4 }], 'end')
     const barW = Math.max(40, rightX - textWidth(right, 12.5) - 10 - x)
     out += contextBar(id(), ctx, x, cy - 4, barW)
+    barX = x
   } else {
     out += line(pad.x, y, 12.5, [{ text: 'Context: waiting for the first reading', color: TOKENS.text4 }])
   }
@@ -260,23 +274,30 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
       { text: '●', color: s.color },
       { text: ` ${s.label} ${fmtTokens(s.tokens)}`, color: TOKENS.text2 },
     ])
-    items.push([{ text: `Free ${fmtTokens(ctx.free)}`, color: TOKENS.text4 }])
+    items.push([
+      { text: 'Free ', color: TOKENS.text4 },
+      { text: fmtTokens(ctx.free), color: TOKENS.freeTokens },
+    ])
+    // Wide: the legend starts under the context bar, or back at the padding if it would not fit there.
+    const total = items.reduce((w, it, i) => w + runsWidth(it, 11.5) + (i ? 12 : 0), 0)
+    const startX = wide && barX + total <= pad.x + inner ? barX : wide ? pad.x : pad.x + LEGEND_IN_NARROW
     // Lines decided with the metrics; within a line the font itself flows the runs.
     const lines: Run[][][] = [[]]
-    let x = pad.x
+    let x = startX
     for (const it of items) {
       const w = runsWidth(it, 11.5)
-      if (x > pad.x && x + w > pad.x + inner) {
+      if (x > startX && x + w > pad.x + inner) {
         lines.push([])
-        x = pad.x
+        x = startX
       }
       lines[lines.length - 1]!.push(it)
       x += w + 12
     }
     let lineTop = y
+    const up = LEGEND_UP[size]
     lines.forEach((ln, i) => {
       if (i > 0) lineTop += lh(11.5) + 4
-      const base = r2(baseline(lineTop, 11.5))
+      const base = r2(baseline(lineTop - up, 11.5))
       const spans = ln
         .map((it, j) =>
           it
@@ -284,7 +305,7 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
             .join(''),
         )
         .join('')
-      out += `<text x="${pad.x}" y="${base}" font-size="11.5" xml:space="preserve">${spans}</text>`
+      out += `<text x="${r2(startX)}" y="${base}" font-size="11.5" xml:space="preserve">${spans}</text>`
     })
     y = lineTop + lh(11.5) + ROW_GAP
   }
@@ -407,16 +428,17 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
       lead && text.startsWith(lead)
         ? [{ text: lead, color: TOKENS.notice, bold: true }, { text: text.slice(lead.length), color: TOKENS.notice }]
         : [{ text, color: TOKENS.notice }]
-    noticeWraps = wide && 15 + runsWidth(runsOf(vm.notice), 12.5) + 12 + buttonsWidthOf() > inner
+    const ns = noticeSize(wide)
+    noticeWraps = wide && NOTICE_TEXT_X + runsWidth(runsOf(vm.notice), ns) + 12 + buttonsWidthOf() > inner
     if (wide && !noticeWraps) {
       const nw = Math.max(80, W - buttonsWidth - 12)
-      const top = (BUTTON_H - lh(12.5)) / 2
+      const top = (BUTTON_H - lh(ns)) / 2
       const body =
         `<circle cx="${pad.x + 3.5}" cy="${r2(BUTTON_H / 2)}" r="3.5" fill="${vm.noticeDot}"/>` +
-        line(pad.x + 15, top, 12.5, fitRuns(runsOf(vm.notice), 12.5, nw - pad.x - 15))
+        line(pad.x + NOTICE_TEXT_X, top, ns, fitRuns(runsOf(vm.notice), ns, nw - pad.x - NOTICE_TEXT_X))
       notice = { svg: svgDoc(nw, BUTTON_H, body, vm.notice), width: nw, height: BUTTON_H }
     } else {
-      const maxW = inner - 15 // narrow, or wide with the buttons wrapped below
+      const maxW = inner - NOTICE_TEXT_X // narrow, or wide with the buttons wrapped below
       // Break where the browser would: after spaces, and after hyphens.
       const words = vm.notice.match(/[^\s-]*-|[^\s-]+\s*|\s+/g) ?? [vm.notice]
       const lines: string[] = []
@@ -432,7 +454,7 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
       const blockH = lines.length * lh(12.5)
       out += `<circle cx="${pad.x + 3.5}" cy="${r2(y + blockH / 2)}" r="3.5" fill="${vm.noticeDot}"/>`
       lines.forEach((t, i) => {
-        out += line(pad.x + 15, y + i * lh(12.5), 12.5, i === 0 ? runsOf(t) : [{ text: t, color: TOKENS.notice }])
+        out += line(pad.x + NOTICE_TEXT_X, y + i * lh(12.5), 12.5, i === 0 ? runsOf(t) : [{ text: t, color: TOKENS.notice }])
       })
       y += blockH + (noticeWraps ? 12 : ROW_GAP)
     }

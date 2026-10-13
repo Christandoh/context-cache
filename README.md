@@ -22,19 +22,17 @@ A limit's percentage alone can mislead. Being at 60% of your weekly allowance is
 
 ## What's on the card
 
-The top row is the context window. Tokens used out of the window, split into System, Tools, Files and Messages, with a legend under the bar and a tick where auto-compact will fire.
+The top row is the context window. Tokens used out of the window, split into System, Tools, Files and Messages, with a legend under the bar and a tick where auto-compact will fire. The share of the window used is in bold.
 
 The middle row is three limits and the cache. Current session is the 5-hour window, Weekly the 7-day one, and Fable the model-specific weekly window. Each has the double bar described above, the two percentages and the reset time. Then the cache. Warm, Cooling or Cold, a temperature bar, how warm it is as a percentage of its time-to-live, the last reply's cache hit rate, and minutes left.
 
 The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation. The notice puts a price on the next message, for example "Cache cold: next message re-reads 452k for ≈$3.62". After a Clear or Compact it turns green and says what was taken out and what that saves, for example "Cleared 452k. Next message costs ≈$3.57 less, or ≈$0.09 less while the cache is warm." That message stays until the next reply lands. In a narrow terminal the notice takes the longest wording that fits its line, so it never cuts off.
 
-Hover over the notice and a card above it shows the sum behind its figure, for example "≈$3.62 = 452k × $8 per million to write the 1-hour cache". The narrower layouts keep the sum alone, and the smallest has no card.
-
-Warm keeps the cache from going cold while you're away. 55 minutes after the last reply it sends a hidden one-line ping over the conversation. The ping pays the cache-read price and resets the cache's hour. Going cold would instead pay twice the input price to write the 1-hour cache again, so a ping costs a twentieth of that on Sonnet 5, a fortieth on Opus 5.5 and an eightieth on Fable 5.1. Pressing Warm says the figure for your session's model. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache. With the 5-minute cache, pinging that often would cost more than letting it go cold.
+Warm keeps the cache from going cold while you're away. 55 minutes after the last reply it sends a hidden one-line ping over the conversation. The ping pays the cache-read price and resets the cache's hour. Going cold would instead pay twice the input price to write the 1-hour cache again, so a ping costs a twentieth of that on Sonnet 5, a fortieth on Opus 5.5 and an eightieth on Fable 5.1. Pressing Warm says the figure for your session's model. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache. With the 5-minute cache, pinging that often would cost more than letting it go cold.
 
 Warm can also switch itself on. `/cache-autowarm 300` turns it on by itself once you've been quiet for 55 minutes with more than 300k in the context, the size where going cold starts to hurt. It's off until you set it. Pressing Stop holds it off until the next reply.
 
-If nothing will keep the 1-hour cache, you hear about it with 5 minutes left, as a notification through your terminal ("Cache goes cold in 5m: send a message to keep 452k cached, or the next one re-writes it for ≈$3.62"), once per reply. The desktop app has no notification channel for mods, so there it's a toast.
+If nothing will keep the 1-hour cache, you hear about it with 5 minutes left, as a notification through your terminal ("Cache cold in 5m, ≈$3.62 to rebuild"), once per reply. The desktop app has no notification channel for mods, so there it's a toast.
 
 As a limit reaches 90%, a toast says so once per window, for example "Weekly at 90%, resets Sat 11:00 pm". When a bar turns amber or red it flashes lighter twice, so the change catches your eye.
 
@@ -71,7 +69,7 @@ Two limits of the platform worth knowing. The desktop app's ordinary chat has no
 
 `/cache` hides or shows the card.
 
-`/cache-status` prints a diagnostics report. It lists which apps are attached, what the mod has drawn, where each figure came from, whether warming is on, and how the last account usage request went, down to the HTTP status and which window matched Fable. It also totals what was saved, today and over the last 7 days: the tokens Clear and Compact took out, and the Warm pings that kept the cache, each with the cache re-write it spared at list price. A Prices line names the list prices the money comes from, or says your model is missing from the list in `hooks/model.ts`, which is why the panel would then show tokens without money. The full report also lands in `context-cache-status.json` in the session's working directory.
+`/cache-status` prints a diagnostics report. It lists which apps are attached, what the mod has drawn, where each figure came from, whether warming is on, and how the last account usage request went, down to the HTTP status and which window matched Fable. It also totals what was saved, today and over the last 7 days: the tokens Clear and Compact took out, and the Warm pings that kept the cache, each with the cache re-write it spared at list price. While Warm is on it adds the run itself: when it started, when it ends, the time of each ping, and what one ping costs against the re-write it saves. A Prices line names the list prices the money comes from, or says your model is missing from the list in `hooks/model.ts`, which is why the panel would then show tokens without money. The full report also lands in `context-cache-status.json` in the session's working directory.
 
 `/cache-pane` opens the card as a pane, on any device.
 

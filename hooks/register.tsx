@@ -12,8 +12,7 @@
 //   were cached with (read from the transcript's usage, or the engine's own
 //   model-switch report), and the last turn's cache-read share.
 // - Prices: $.session.model(), priced from the list in model.ts. After a Clear
-//   or Compact the notice says what was taken out (context before and after);
-//   hovering the notice shows the sum behind its figure.
+//   or Compact the notice says what was taken out (context before and after).
 //
 // Also: auto-warm above a context size (/cache-autowarm), a notice when the
 // cache has 5 minutes left, a toast as a limit reaches 90%, a pulse when a bar
@@ -31,7 +30,6 @@ import {
   fmtSpan,
   fmtTokens,
   fmtUsd,
-  fraction,
   priceOf,
   noticeText,
   pct,
@@ -75,6 +73,13 @@ const WARM_PROMPT = 'Keep-alive ping for the prompt cache. Reply with only: ok'
 let warmInFlight = false
 /** The last successful ping of this warming run, for the notice line. */
 let lastPing: { at: number; read: number } | null = null
+/** This warming run for /cache-status, kept in the store so a reload keeps it. */
+type WarmRun = { startedAt: number; until: number; pings: { at: number; read: number }[] }
+
+async function startWarmRun($: EngineInterface, startedAt: number, until: number) {
+  lastPing = null
+  await $.store.set('warmRun', { startedAt, until, pings: [] } satisfies WarmRun)
+}
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 // The account endpoint answers 429 to anyone who leans on it; the status-line
@@ -174,6 +179,7 @@ async function statusReport($: EngineInterface): Promise<string> {
     priceLine(snap?.model),
     ...tallyLines(await readDays($)),
     `Warming: ${warmUntil === null ? 'off' : `on until ${fmtClock(warmUntil)}; ${warming ? warmNotice(warming, snap!.context)[0] : 'no note'}`}`,
+    ...(warmUntil === null ? [] : warmRunLines((await $.store.get('warmRun')) as WarmRun | null | undefined, snap, warming, await $.clock.now())),
     `Auto-warm: ${(await autoWarmAt($)) === 0 ? 'off (/cache-autowarm sets it)' : `when quiet with a context over ${fmtTokens(await autoWarmAt($))}${autoHeld ? '; held off until the next reply' : ''}`}`,
     `Full report: ${cwd ? `${cwd}/` : ''}${DIAG_FILE}`,
   ]
@@ -481,6 +487,26 @@ function tallyLines({ today, days }: { today: string; days: Days }): string[] {
   ]
 }
 
+/** The current Warm run: when it started and ends, each ping, and what the pings spared (as addToTally counts it). */
+function warmRunLines(run: WarmRun | null | undefined, snap: ContextCacheSnapshot | null, warming: ContextCacheWarming | null, now: number): string[] {
+  if (!run) return []
+  const last = run.pings.at(-1)
+  const price = snap ? priceOf(snap.model, snap.cache.ttlMs) : null
+  const lines = [
+    `Warm run: on since ${fmtClock(run.startedAt)} (${fmtSpan(now - run.startedAt)}), ends ${fmtClock(run.until)} (${fmtSpan(run.until - now)} left)`,
+    `Pings: ${run.pings.length ? run.pings.map(p => fmtClock(p.at).replace(/ [ap]m$/, '')).join(', ') : 'none yet'}` +
+      `${warming ? ` · next ${fmtClock(warming.nextAt).replace(/ [ap]m$/, '')}` : ''}${last ? ` · ${fmtTokens(last.read)} kept cached each` : ''}`,
+  ]
+  // A ping is a fork: nothing enters the chat.
+  if (price && last)
+    lines.push(`Each ping: 0 tokens added to the chat · reads ${fmtTokens(last.read)} from cache · costs ${fmtUsd(last.read * price.read)} · saves ${fmtUsd(last.read * price.write)} (net ${fmtUsd(last.read * (price.write - price.read))})`)
+  if (price && run.pings.length) {
+    const read = run.pings.reduce((n, p) => n + p.read, 0)
+    lines.push(`This run: ${fmtUsd(read * (price.write - price.read))} of re-writes avoided (pings ${fmtUsd((read * price.read) / run.pings.length)} each)`)
+  }
+  return lines
+}
+
 /** Which list prices the money comes from, or that the model has none. */
 function priceLine(model: string | null | undefined): string {
   if (!model) return 'Prices: the model is not known yet, so the panel shows tokens without money'
@@ -558,16 +584,17 @@ async function warmingOf($: EngineInterface, { cache }: ContextCacheSnapshot): P
 
 /** Why the cache can't be kept warm now, or null when it can. */
 function whyNoWarm(cache: ContextCacheCache, now: number): string | null {
-  if (cache.ttlMs !== TTL_1H) return 'this session uses the 5-minute cache; pinging every few minutes costs more than letting it go cold'
-  if (cache.lastAt === null) return 'nothing is cached yet'
-  if (now - cache.lastAt >= cache.ttlMs) return 'the cache has already gone cold'
+  if (cache.ttlMs !== TTL_1H) return '5-minute cache'
+  if (cache.lastAt === null) return 'nothing cached'
+  if (now - cache.lastAt >= cache.ttlMs) return 'cache already cold'
   return null
 }
 
 async function stopWarm($: EngineInterface, why: string) {
   autoHeld = true
   await update($, warmUntilAtom, () => null)
-  $.ui.toast(`Warming stopped: ${why}.`)
+  await $.store.set('warmRun', null)
+  $.ui.toast(`Warm off, ${why}.`)
 }
 
 // Auto-warm: Warm switches itself on once you have been quiet 55 minutes with
@@ -589,10 +616,9 @@ async function coldSoon($: EngineInterface, snap: ContextCacheSnapshot, now: num
   if (cache.lastAt === null || coldSoonFor === cache.lastAt) return
   coldSoonFor = cache.lastAt
   const price = priceOf(snap.model, cache.ttlMs)
-  const tokens = context ? fmtTokens(context.used) : 'the conversation'
   const text =
-    `Cache goes cold in ${fmtSpan(cache.lastAt + cache.ttlMs - now)}: send a message to keep ${tokens} cached` +
-    (price && context ? `, or the next one re-writes it for ${fmtUsd(context.used * price.write)}.` : '.')
+    `Cache cold in ${fmtSpan(cache.lastAt + cache.ttlMs - now)}` +
+    (price && context ? `, ${fmtUsd(context.used * price.write)} to rebuild.` : '.')
   const sent = await $.ui.notify(text, { title: 'Context & cache' }).catch(() => ({ isSent: false as const }))
   if (!sent.isSent) $.ui.toast(text)
 }
@@ -609,29 +635,30 @@ async function warmTick($: EngineInterface) {
     const at = await autoWarmAt($)
     if (autoHeld || at === 0 || (snap.context?.used ?? 0) < at) return coldSoon($, snap, now)
     until = now + WARM_FOR_MS
-    lastPing = null
+    await startWarmRun($, now, until)
     await update($, warmUntilAtom, () => until)
-    $.ui.toast(`Auto-warm: the context (${fmtTokens(snap.context!.used)}) is over ${fmtTokens(at)}, so Warm switched on. Press Stop to end it.`)
+    $.ui.toast(`Auto-warm on, context ${fmtTokens(snap.context!.used)}.`)
   }
-  if (now >= until) return stopWarm($, 'it ran for 8 hours')
+  if (now >= until) return stopWarm($, 'ran 8h')
   const why = whyNoWarm(cache, now)
   if (why) return stopWarm($, why)
   if (now - cache.lastAt! < WARM_AFTER_MS) return
   warmInFlight = true
   try {
     const r = await $.model.fork({ prompt: WARM_PROMPT })
-    if (!r.isAnswered && r.reason === 'nothing-to-fork') return stopWarm($, 'nothing is cached yet')
+    if (!r.isAnswered && r.reason === 'nothing-to-fork') return stopWarm($, 'nothing cached')
     const u = 'usage' in r ? r.usage : undefined
     if (u && u.cache_read_input_tokens > 0) {
       const at = await $.clock.now()
       lastPing = { at, read: u.cache_read_input_tokens }
+      const run = (await $.store.get('warmRun')) as WarmRun | null | undefined
+      if (run) await $.store.set('warmRun', { ...run, pings: [...run.pings, lastPing] })
       await patchCache($, { lastAt: at })
       // A ping pays a cache read and spares the re-write going cold would cost.
       const price = priceOf((await current($)).model, cache.ttlMs)
       await addToTally($, { pings: 1, pingUsd: price ? u.cache_read_input_tokens * (price.write - price.read) : 0 })
-      $.ui.toast(`Kept the cache warm at ${fmtClock(at)} (read ${fmtTokens(u.cache_read_input_tokens)} from cache). Next ping ${fmtClock(at + WARM_AFTER_MS)}.`)
     }
-    else if (u && u.cache_creation_input_tokens > 0) await stopWarm($, 'the ping missed the cache and rewrote it')
+    else if (u && u.cache_creation_input_tokens > 0) await stopWarm($, 'ping missed the cache')
     // else an API error: the next tick retries while the cache is still warm
   } finally {
     warmInFlight = false
@@ -647,42 +674,41 @@ async function actionsFor($: EngineInterface, isWorking: boolean): Promise<Actio
       if ((await read($, warmUntilAtom)) !== null) {
         autoHeld = true
         await update($, warmUntilAtom, () => null)
-        $.ui.toast('Warming stopped.')
+        $.ui.toast('Warm off.')
         return
       }
       const now = await $.clock.now()
       const why = whyNoWarm((await current($)).cache, now)
       if (why) {
-        $.ui.toast(`Can't warm: ${why}.`)
+        $.ui.toast(`Can't warm, ${why}.`)
         return
       }
-      lastPing = null
+      await startWarmRun($, now, now + WARM_FOR_MS)
       await update($, warmUntilAtom, () => now + WARM_FOR_MS)
-      // What a ping costs against going cold follows the model: a fortieth on Opus 5.5, a twentieth on Sonnet 5.
       const snap = await current($)
       const price = priceOf(snap.model, snap.cache.ttlMs)
       const cost =
         price && snap.context
-          ? ` Each ping reads ${fmtTokens(snap.context.used)} for ${fmtUsd(snap.context.used * price.read)}, ${fraction(price.read, price.write)} of the ${fmtUsd(snap.context.used * price.write)} re-write going cold costs.`
+          ? ` ${fmtUsd(snap.context.used * price.read)} a ping, saves ${fmtUsd(snap.context.used * price.write)}.`
           : ''
-      $.ui.toast(`Keeping the cache warm: a hidden ping ${WARM_AFTER_MS / 60_000} min after the last reply, for up to 8 hours.${cost} Press Stop to end it.`)
+      $.ui.toast(`Warm on for 8h.${cost}`)
     },
     clear: async () => {
-      if (isWorking) $.ui.toast('Clear runs once the current turn finishes.')
+      if (isWorking) $.ui.toast('Clear after this turn.')
       try {
         await $.command.run({ command: 'clear' })
       } catch {
-        $.ui.toast('Could not run /clear right now.')
+        $.ui.toast('/clear failed.')
       }
     },
     // Queued like Clear: $.session.compact() rejects whenever the engine is not idle.
     // Our session.compact hook resets the cache once it runs.
     compact: async () => {
-      if (isWorking) $.ui.toast('Compact runs once the current turn finishes.')
+      if (isWorking) $.ui.toast('Compact after this turn.')
       try {
         await $.command.run({ command: 'compact' })
       } catch (err) {
-        $.ui.toast(`Could not run /compact: ${err instanceof Error ? err.message : String(err)}`)
+        $.ui.toast(`/compact failed: ${err instanceof Error ? err.message : String(err)}`)
       }
     },
   }
@@ -776,7 +802,7 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (!warmInFlight && (await read($, warmUntilAtom)) !== null) {
       await update($, warmUntilAtom, () => null)
-      $.ui.toast('Welcome back: warming stopped.')
+      $.ui.toast('Welcome back. Warm off.')
     }
     return next(e)
   }).catch((_$, e, next) => next(e))
@@ -805,8 +831,8 @@ export const register: Register = on => {
     // A switch nobody was asked about (an automatic fallback) still throws a
     // warm cache away: say what the next message pays to write it again.
     if (e.prompt_cache_warm && e.context_tokens > 0 && e.source === 'auto') {
-      const usd = e.pricing === 'default' ? '' : ` for ${fmtUsd(e.estimated_cache_write_usd)}`
-      $.ui.toast(`Model switched: the warm cache is gone. The next message re-writes ${fmtTokens(e.context_tokens)}${usd}.`)
+      const usd = e.pricing === 'default' ? '' : ` Next message ${fmtUsd(e.estimated_cache_write_usd)}.`
+      $.ui.toast(`Model switched, cache lost.${usd}`)
     }
     await setTtl($, e.cache_ttl === '5m' ? TTL_5M : TTL_1H)
     await patchCache($, { lastAt: null, hitRate: null })

@@ -16,3 +16,7 @@ scripts/package-lock.json
 HANDOFF.md
 # kept on disk, not published: copies the source into the plugin cache
 scripts/sync-cache.mjs
+# kept on disk, not published: the editable HTML preview of the panel and its saved edits
+preview.html
+preview-*.json
+scripts/preview.mts

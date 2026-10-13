@@ -4,7 +4,7 @@
 
 import type { Elements } from 'claude-code'
 
-import { explainFor, explainRows, fmtTokens, pct, TOKENS, tempColorAt, mix, type CacheView, type LimitView, type ViewModel } from './model'
+import { fmtTokens, pct, TOKENS, tempColorAt, mix, type CacheView, type LimitView, type ViewModel } from './model'
 import { panelSvg } from './panel-svg'
 
 export type Actions = {
@@ -31,38 +31,6 @@ function usageLine(l: LimitView): { main: string; time: string } {
 function cacheLine(c: CacheView): { main: string; hit: string } {
   if (c.state === 'empty') return { main: 'Warmth —', hit: c.hit === null ? '' : ` · Hit ${pct(c.hit)}%` }
   return { main: `Warmth ${pct(c.warmth * 100)}%`, hit: ` · Hit ${c.hit === null ? '—' : `${pct(c.hit)}%`}` }
-}
-
-/**
- * The card hovering the notice reveals: how its money is worked out. Drawn
- * hidden, absolutely placed just above the notice's row over the row above
- * it, so showing it moves nothing. `width` in cells.
- */
-function explainCard(E: TermEls | DeskEls, explain: string | null, width: number, size: ViewModel['size']) {
-  const text = explainFor(explain, size)
-  if (!text) return null
-  const { Box, Text } = E
-  const w = Math.max(20, width)
-  const lines = explainRows(text, w) - 2
-  return (
-    // No key of its own: a keyed Box drawn hidden is a hover scope the pointer can never be over.
-    <Box
-      position="absolute"
-      top={-(lines + 2)}
-      left={0}
-      width={w}
-      display="none"
-      hover={{ display: 'flex' }}
-      borderStyle="round"
-      borderColor={TOKENS.borderStrong}
-      backgroundColor={TOKENS.card}
-      paddingX={1}
-    >
-      <Text wrap="wrap" color={TOKENS.text2}>
-        {text}
-      </Text>
-    </Box>
-  )
 }
 
 // ── Terminal ───────────────────────────────────────────────────────────────
@@ -148,10 +116,20 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
 
   // Row 1: context
   const ctx = vm.context
+  // "112k / 1M (11%)": the percentage bold and white, as on the desktop.
+  const used = ctx?.usedLabel.match(/^(.*\()(\d+%)(\))$/)
   const contextRow = ctx ? (
     <Box flexDirection="row">
       <Text bold color={TOKENS.text}>Context </Text>
-      <Text color={TOKENS.text3}>{ctx.usedLabel} </Text>
+      {used ? (
+        <Text color={TOKENS.text3}>
+          {used[1]}
+          <Text bold color={TOKENS.strong}>{used[2]}</Text>
+          {`${used[3]} `}
+        </Text>
+      ) : (
+        <Text color={TOKENS.text3}>{ctx.usedLabel} </Text>
+      )}
       {bar(contextCells(ctx, Math.max(6, inner - 8 - ctx.usedLabel.length - 1 - ctx.rightLabel.length - 1)))}
       <Text color={TOKENS.text4}> {ctx.rightLabel}</Text>
     </Box>
@@ -159,18 +137,24 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
     <Text color={TOKENS.text4}>Context: waiting for the first reading</Text>
   )
 
-  // Row 2: legend
+  // Row 2: legend. Wide, it starts under the context bar ("Context " and the
+  // used label before it); narrow, one cell in. Only where it still fits on one line.
+  const legendLen = ctx ? ctx.segments.reduce((n, s) => n + `● ${s.label} ${fmtTokens(s.tokens)}  `.length, 0) + `Free ${fmtTokens(ctx.free)}`.length : 0
+  const indent = !ctx ? 0 : wide ? 8 + ctx.usedLabel.length + 1 : 1
   const legend =
     ctx && vm.showLegend ? (
-      <Text wrap="wrap">
-        {ctx.segments.map(s => (
-          <Text>
-            <Text color={s.color}>● </Text>
-            <Text color={TOKENS.text2}>{`${s.label} ${fmtTokens(s.tokens)}  `}</Text>
-          </Text>
-        ))}
-        <Text color={TOKENS.text4}>{`Free ${fmtTokens(ctx.free)}`}</Text>
-      </Text>
+      <Box paddingLeft={indent + legendLen <= inner ? indent : 0}>
+        <Text wrap="wrap">
+          {ctx.segments.map(s => (
+            <Text>
+              <Text color={s.color}>● </Text>
+              <Text color={TOKENS.text2}>{`${s.label} ${fmtTokens(s.tokens)}  `}</Text>
+            </Text>
+          ))}
+          <Text color={TOKENS.text4}>Free </Text>
+          <Text color={TOKENS.freeTokens}>{fmtTokens(ctx.free)}</Text>
+        </Text>
+      </Box>
     ) : null
 
   // Row 3: limits + cache
@@ -272,7 +256,6 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
         <Box flexDirection="row" columnGap={1}>
           <Box key="notice" flexGrow={1} flexShrink={1}>
             <Text wrap="truncate">{noticeText}</Text>
-            {explainCard(E, vm.explain, inner, vm.size)}
           </Box>
           {buttons}
         </Box>
@@ -280,9 +263,8 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
         <Box flexDirection="column">
           <Box key="notice">
             <Text wrap="wrap">{noticeText}</Text>
-            {explainCard(E, vm.explain, inner, vm.size)}
           </Box>
-          {buttons}
+          <Box flexDirection="row" justifyContent="flex-end">{buttons}</Box>
         </Box>
       )
     : null
@@ -347,14 +329,13 @@ export function renderDesktop(E: DeskEls, vm: ViewModel, widthPx: number, action
         <Box flexDirection="row" alignItems="center" columnGap={1} paddingRight={padX} paddingBottom={1}>
           <Box key="notice" flexGrow={1} flexShrink={1} minWidth={0}>
             <Svg source={p.notice.svg} alt={vm.notice} />
-            {explainCard(E, vm.explain, Math.floor(widthPx / 8) - 4, vm.size)}
           </Box>
           {buttons}
         </Box>
       ) : (
-        // The notice is in the SVG above; the buttons sit together under it.
+        // The notice is in the SVG above; the buttons sit together under it, at the right.
         // (The design's equal-width buttons need stretchable controls, which the host's native buttons are not.)
-        <Box flexDirection="row" paddingX={padX} paddingBottom={1}>{buttons}</Box>
+        <Box flexDirection="row" justifyContent="flex-end" paddingX={padX} paddingBottom={1}>{buttons}</Box>
       )
   }
   return (
