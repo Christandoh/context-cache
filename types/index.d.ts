@@ -82,6 +82,8 @@ declare module 'claude-code' {
       pxPerCell: number
       /** Keep-warm: when it switches itself off, epoch milliseconds; null while off. */
       warmUntil: number | null
+      /** /cache-mini: the band drawn as one line. */
+      isMini: boolean
     }
   }
 }

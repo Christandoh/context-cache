@@ -697,6 +697,37 @@ export function buildView(
   }
 }
 
+// ── /cache-mini ────────────────────────────────────────────────────────────
+
+/**
+ * The panel as one line: context %, the cache and what the next message costs
+ * ("Context 45% · Cache warm, 59m left · Next message ≈$0.09"). The longest
+ * wording that fits `columns` less the dot is taken.
+ */
+export function miniLine(snap: ContextCacheSnapshot, now: number, columns: number): string {
+  const cache = cacheView(snap.cache, now)
+  const ctx = snap.context
+  const price = priceOf(snap.model, snap.cache.ttlMs)
+  const live = cache.state === 'warm' || cache.state === 'cooling'
+  const left = live
+    ? snap.cache.ttlMs < 10 * 60_000
+      ? fmtSpan(cache.remainingMs, true)
+      : `${Math.max(1, Math.round(cache.remainingMs / 60_000))}m`
+    : ''
+  const usd = ctx && price ? fmtUsd(ctx.used * (live ? price.read : price.write)) : ''
+  const p = ctx ? `${pct((ctx.used / ctx.window) * 100)}%` : ''
+  const join = (...parts: string[]) => parts.filter(Boolean).join(' · ')
+  const options = [
+    join(p && `Context ${p}`, `Cache ${cache.label.toLowerCase()}${left ? `, ${left} left` : ''}`, usd && `Next message ${usd}`),
+    join(p, `${cache.label}${left ? ` ${left}` : ''}`, usd),
+    join(p, `${cache.label}${left ? ` ${left}` : ''}`),
+    cache.label,
+  ]
+  const room = columns - 2
+  const fit = options.find(o => o.length <= room)
+  return fit ?? options[options.length - 1]!.slice(0, Math.max(0, room))
+}
+
 // ── Colour helpers ─────────────────────────────────────────────────────────
 
 function hexToRgb(hex: string): [number, number, number] {

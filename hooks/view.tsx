@@ -303,6 +303,19 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
   )
 }
 
+/** /cache-mini: the whole panel as one line, a dot in the cache's colour first. */
+export function renderMini(E: TermEls | DeskEls, line: string, dot: string) {
+  const { Box, Text } = E
+  return (
+    <Box key="context-cache-mini" paddingX={1}>
+      <Text wrap="truncate">
+        <Text color={dot}>● </Text>
+        <Text color={TOKENS.text2}>{line}</Text>
+      </Text>
+    </Box>
+  )
+}
+
 // ── Desktop (and the editor, and the phone's pane) ─────────────────────────
 //
 // The design at its real pixel sizes: hooks/panel-svg.ts lays rows 1–3 (and a

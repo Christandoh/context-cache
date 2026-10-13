@@ -34,6 +34,7 @@ import {
   fileShareOf,
   isPulseLit,
   limitToast,
+  miniLine,
   limitsFromResponse,
   listPrice,
   parseAccountUsage,
@@ -44,7 +45,7 @@ import {
   usageWindowsOf,
   warmNotice,
 } from './model'
-import { renderDesktop, renderTerminal, type Actions } from './view'
+import { renderDesktop, renderMini, renderTerminal, type Actions } from './view'
 
 const snapshotAtom = atom({ plugin: 'context-cache', key: 'snapshot' } as const, null)
 const hiddenAtom = atom({ plugin: 'context-cache', key: 'isHidden' } as const, false)
@@ -55,6 +56,8 @@ const nowAtom = atom({ plugin: 'context-cache', key: 'now' } as const, 0)
 const pxPerCellAtom = atom({ plugin: 'context-cache', key: 'pxPerCell' } as const, 8)
 const DEFAULT_PX_PER_CELL = 8
 const warmUntilAtom = atom({ plugin: 'context-cache', key: 'warmUntil' } as const, null)
+// /cache-mini: the band as one line; kept across sessions in the store.
+const miniAtom = atom({ plugin: 'context-cache', key: 'isMini' } as const, false)
 
 // Keep-warm: a cache read resets the 1h TTL for free, so one tool-less fork of
 // the main thread 55 min after the last reply keeps it alive at ~0.1x of the
@@ -498,6 +501,7 @@ const PANE = 'context-cache'
 const COMMANDS = [
   { name: 'cache', description: 'Context & cache panel: show or hide it' },
   { name: 'cache-status', description: 'Context & cache panel: where each figure comes from (surfaces, draws, the account usage request, Fable) and what was saved today' },
+  { name: 'cache-mini', description: 'Context & cache panel: one line (context %, cache, the next message\'s price) or the whole card' },
   { name: 'cache-pane', description: 'Context & cache panel: open it as a pane (the way it shows on mobile)' },
   { name: 'cache-refresh', description: 'Context & cache panel: re-read usage now' },
   { name: 'cache-scale', description: 'Context & cache panel: px per cell the desktop draws at (default 8); a number sets it, none steps it', argumentHint: '[px]' },
@@ -679,6 +683,7 @@ export const register: Register = on => {
     for (const c of COMMANDS) await $.command.register(c)
     const storedPx = await $.store.get('pxPerCell')
     if (typeof storedPx === 'number' && storedPx > 0) await update($, pxPerCellAtom, () => storedPx)
+    if ((await $.store.get('isMini')) === true) await update($, miniAtom, () => true)
     const initial = await current($)
     await update($, snapshotAtom, prev => prev ?? initial)
     void refresh($)
@@ -842,6 +847,17 @@ export const register: Register = on => {
     return { text: `Desktop now draws at ${n} px per cell (was ${was}). Run it again to step up; /cache-scale <px> sets it outright.` }
   })
 
+  on('command.run', { command: 'cache-mini' }, async $ => {
+    const isMini = !(await read($, miniAtom))
+    await $.store.set('isMini', isMini)
+    await update($, miniAtom, () => isMini)
+    return {
+      text: isMini
+        ? 'Context & cache panel: one line (context, cache, next message). /cache-mini again for the whole card.'
+        : 'Context & cache panel: the whole card again.',
+    }
+  })
+
   on('command.run', { command: 'cache-autowarm' }, async ($, e) => {
     const was = await autoWarmAt($)
     const typed = e.args.trim() === '' ? NaN : Number(e.args.trim())
@@ -892,6 +908,13 @@ export const register: Register = on => {
     if (e.props.hasSurvey) return next(e)
     if (e.props.view.agentId !== undefined) return next(e)
     const E = $.ui.resolve(e)
+    if (await read($, miniAtom)) {
+      const [snap, hidden, tick] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom), read($, nowAtom)])
+      if (hidden || !snap) return next(e)
+      const now = Math.max(tick, snap.updatedAt)
+      // paddingX 1 each side
+      return renderMini(E, miniLine(snap, now, e.props.bodyColumns - 2), cacheView(snap.cache, now).color)
+    }
     if (e.surface === 'terminal') {
       const vm = await panelModel($, e.props.bodyColumns, e.props.maxRows, terminalNoticeChars(e.props.bodyColumns))
       if (!vm) return next(e)
