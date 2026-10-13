@@ -26,7 +26,7 @@ The top row is the context window. Tokens used out of the window, split into Sys
 
 The middle row is three limits and the cache. Current session is the 5-hour window, Weekly the 7-day one, and Fable the model-specific weekly window. Each has the double bar described above, the two percentages and the reset time. Then the cache. Warm, Cooling or Cold, a temperature bar, how warm it is as a percentage of its time-to-live, the last reply's cache hit rate, and minutes left.
 
-The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation.
+The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation. The notice puts a price on the next message, for example "Cache cold: next message re-reads 452k for ≈$3.62". After a Clear or Compact it turns green and says what was taken out and what that saves, for example "Cleared 452k. Next message costs ≈$3.57 less, or ≈$0.09 less while the cache is warm." That message stays until the next reply lands. In a narrow terminal the notice takes the longest wording that fits its line, so it never cuts off.
 
 Warm, new in 0.1.6, keeps the cache from going cold while you're away. 55 minutes after the last reply it sends a hidden one-line ping over the conversation. The ping reads the cache at a tenth of the price and resets its hour, so it costs about a twentieth of a cold re-read. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache. With the 5-minute cache, pinging that often would cost more than letting it go cold.
 
@@ -85,6 +85,8 @@ Every figure has a named source. One is worked out rather than reported. Files i
 | Time % | worked out from each window's reset time and its length (5h or 7d) |
 | Cache TTL (5m or 60m) | read from the `cache_creation` usage of your last response in the transcript, or from Claude Code's own report when you switch model; remembered across sessions |
 | Last cache write | each reply in the main conversation as it arrives, mid-turn included (or, on resume, how long ago the last response was) |
+| Prices (≈$) | the session's model from Claude Code, priced from a list in `hooks/model.ts`: input and cache-read list prices, with a cache write at 2× input for the 1-hour cache and 1.25× for 5 minutes. On a subscription you don't pay per token, so read it as how much of your limits the tokens would use. An unknown model shows tokens only |
+| What Clear or Compact saved | the context before, and again once Claude Code reports the new size |
 | Hit % | cache reads divided by (cache reads + cache writes + uncached input), for the last reply during a turn and for the whole turn once it ends |
 
 Warmth is remaining TTL divided by TTL. Warm above 25%, Cooling between 1 and 25%, Cold at 0%. A `/clear`, a compaction or a model switch empties the cache, and the card shows "Nothing cached yet" until the first reply of the next turn arrives.

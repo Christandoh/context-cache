@@ -1,7 +1,7 @@
 {
   "name": "context-cache",
   "version": "0.1.9",
-  "description": "A panel above the prompt showing context usage, usage limits (session, weekly, Fable) and prompt-cache temperature, with Clear, Compact and Warm buttons.",
+  "description": "A panel above the prompt showing context usage, usage limits (session, weekly, Fable) and prompt-cache temperature, with Clear, Compact and Warm buttons and what each message costs.",
   "author": {
     "name": "Chris Tandoh"
   },

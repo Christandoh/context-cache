@@ -11,6 +11,8 @@
 // - Cache: the time of the last main-thread response, the TTL the responses
 //   were cached with (read from the transcript's usage, or the engine's own
 //   model-switch report), and the last turn's cache-read share.
+// - Prices: $.session.model(), priced from the list in model.ts. After a Clear
+//   or Compact the notice says what was taken out (context before and after).
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -25,6 +27,7 @@ import {
   fmtTokens,
   noticeText,
   pct,
+  sizeClassOf,
   type ViewModel,
   fileShareOf,
   limitsFromResponse,
@@ -315,9 +318,16 @@ async function doRefresh($: EngineInterface, forceAccount: boolean) {
     limitsSource = limits.length > 0 ? 'account' : 'none'
   }
 
+  let model = prev.model ?? null
+  try {
+    model = await $.session.model()
+  } catch {
+    // keep the last one read; without it the notice leaves out prices
+  }
+
   await update($, snapshotAtom, latest => {
     const s = latest ?? prev
-    return { ...s, context, limits, limitsSource, updatedAt: now }
+    return { ...s, context, limits, limitsSource, model, updatedAt: now }
   })
   await update($, nowAtom, () => now)
 }
@@ -330,6 +340,16 @@ function refresh($: EngineInterface, forceAccount = false): Promise<void> {
     refreshing = null
   })
   return refreshing
+}
+
+/** After a Clear or Compact: re-read the context and keep what was taken out, for the notice. */
+async function noteSaved($: EngineInterface, kind: 'clear' | 'compact', before: number | null) {
+  // A refresh already in flight read the context from before; the second reads it after.
+  await refresh($)
+  await refresh($)
+  const after = (await current($)).context?.used ?? 0
+  if (before === null || before <= after) return
+  await update($, snapshotAtom, s => (s ? { ...s, saved: { kind, before, after } } : s))
 }
 
 async function learnTtl($: EngineInterface, transcriptPath: string) {
@@ -368,16 +388,23 @@ async function widthPx($: EngineInterface, columns: number): Promise<number> {
   return columns * (await read($, pxPerCellAtom)) - 2
 }
 
+/** The terminal notice's room: the card's border and padding, "● ", and beside the buttons ([Clear] [Compact] [Warm]) when wide. */
+function terminalNoticeChars(columns: number): number {
+  const wide = sizeClassOf(columns) === 'a' || sizeClassOf(columns) === 'b'
+  return columns - 6 - (wide ? 25 : 0)
+}
+
 /** The size classes are set in the design's cells (8px each): a px width as that many. */
 function designCells(px: number): number {
   return px / DEFAULT_PX_PER_CELL
 }
 
 /** The view model for a drawing, or null while hidden or before any reading. */
-async function panelModel($: EngineInterface, columns: number, maxRows: number): Promise<ViewModel | null> {
+async function panelModel($: EngineInterface, columns: number, maxRows: number, fitChars?: number): Promise<ViewModel | null> {
   const [snap, hidden, tick] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom), read($, nowAtom)])
   if (hidden || !snap) return null
-  const vm = buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows)
+  const vm = buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows, fitChars)
+  if (snap.saved) return vm
   const warm = await warmNote($, snap, isShortNotice(vm.size))
   return warm ? { ...vm, notice: warm } : vm
 }
@@ -532,6 +559,7 @@ export const register: Register = on => {
       void $.clock
         .now()
         .then(now => patchCache($, { lastAt: now, hitRate: total > 0 ? u.cache_read_input_tokens / total : null }))
+        .then(() => update($, snapshotAtom, s => (s?.saved ? { ...s, saved: null } : s)))
         .catch(() => undefined)
     }
     return r
@@ -586,20 +614,22 @@ export const register: Register = on => {
 
   // A compaction replaces the conversation: nothing of the new one is cached yet.
   on('session.compact', async ($, e, next) => {
+    const before = (await current($)).context?.used ?? null
     const result = await next(e)
     if (e.trigger !== 'precompute' && !('skip' in result)) {
       await patchCache($, { lastAt: null, hitRate: null })
-      void refresh($)
+      await noteSaved($, 'compact', before)
     }
     return result
   }).catch((_$, e, next) => next(e))
 
   // /clear starts a fresh conversation in the same process.
   on('session.end', async ($, e, next) => {
+    const before = (await current($)).context?.used ?? null
     const result = await next(e)
     if (e.reason === 'clear') {
       await patchCache($, { lastAt: null, hitRate: null })
-      void refresh($)
+      await noteSaved($, 'clear', before)
     }
     return result
   })
@@ -661,7 +691,7 @@ export const register: Register = on => {
     if (e.props.view.agentId !== undefined) return next(e)
     const E = $.ui.resolve(e)
     if (e.surface === 'terminal') {
-      const vm = await panelModel($, e.props.bodyColumns, e.props.maxRows)
+      const vm = await panelModel($, e.props.bodyColumns, e.props.maxRows, terminalNoticeChars(e.props.bodyColumns))
       if (!vm) return next(e)
       return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, (await actionsFor($, e.props.isWorking)))
     }
@@ -682,7 +712,7 @@ export const register: Register = on => {
     const { Text } = E
     const rows = Math.max(e.props.scroll.bodyRows, 12)
     if (e.surface === 'terminal') {
-      const vm = await panelModel($, e.props.bodyColumns, rows)
+      const vm = await panelModel($, e.props.bodyColumns, rows, terminalNoticeChars(e.props.bodyColumns))
       if (!vm) return <Text dimColor>Reading usage…</Text>
       return renderTerminal(E as Parameters<typeof renderTerminal>[0], vm, e.props.bodyColumns, (await actionsFor($, false)))
     }

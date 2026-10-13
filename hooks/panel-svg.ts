@@ -401,13 +401,19 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
   let noticeWraps = false
   const buttonsWidth = buttonsWidthOf() + pad.x
   if (vm.notice) {
-    noticeWraps = wide && 15 + textWidth(vm.notice, 12.5) + 12 + buttonsWidthOf() > inner
+    // The bold lead (after a Clear or Compact) and the rest, in the notice colour.
+    const lead = vm.noticeLead
+    const runsOf = (text: string): Run[] =>
+      lead && text.startsWith(lead)
+        ? [{ text: lead, color: TOKENS.notice, bold: true }, { text: text.slice(lead.length), color: TOKENS.notice }]
+        : [{ text, color: TOKENS.notice }]
+    noticeWraps = wide && 15 + runsWidth(runsOf(vm.notice), 12.5) + 12 + buttonsWidthOf() > inner
     if (wide && !noticeWraps) {
       const nw = Math.max(80, W - buttonsWidth - 12)
       const top = (BUTTON_H - lh(12.5)) / 2
       const body =
-        `<circle cx="${pad.x + 3.5}" cy="${r2(BUTTON_H / 2)}" r="3.5" fill="${c.color}"/>` +
-        line(pad.x + 15, top, 12.5, [{ text: ellipsize(vm.notice, 12.5, nw - pad.x - 15), color: TOKENS.text2 }])
+        `<circle cx="${pad.x + 3.5}" cy="${r2(BUTTON_H / 2)}" r="3.5" fill="${vm.noticeDot}"/>` +
+        line(pad.x + 15, top, 12.5, fitRuns(runsOf(vm.notice), 12.5, nw - pad.x - 15))
       notice = { svg: svgDoc(nw, BUTTON_H, body, vm.notice), width: nw, height: BUTTON_H }
     } else {
       const maxW = inner - 15 // narrow, or wide with the buttons wrapped below
@@ -424,9 +430,9 @@ export function panelSvg(vm: ViewModel, width: number, idPrefix = 'cc'): PanelSv
       }
       if (cur.trim()) lines.push(cur.trimEnd())
       const blockH = lines.length * lh(12.5)
-      out += `<circle cx="${pad.x + 3.5}" cy="${r2(y + blockH / 2)}" r="3.5" fill="${c.color}"/>`
+      out += `<circle cx="${pad.x + 3.5}" cy="${r2(y + blockH / 2)}" r="3.5" fill="${vm.noticeDot}"/>`
       lines.forEach((t, i) => {
-        out += line(pad.x + 15, y + i * lh(12.5), 12.5, [{ text: t, color: TOKENS.text2 }])
+        out += line(pad.x + 15, y + i * lh(12.5), 12.5, i === 0 ? runsOf(t) : [{ text: t, color: TOKENS.notice }])
       })
       y += blockH + (noticeWraps ? 12 : ROW_GAP)
     }

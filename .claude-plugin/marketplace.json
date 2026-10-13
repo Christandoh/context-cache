@@ -7,7 +7,7 @@
     {
       "name": "context-cache",
       "source": "./",
-      "description": "A panel above the prompt: context usage, session / weekly / Fable limits, and prompt-cache temperature, with Clear, Compact and Warm (keeps the cache from going cold while you are away)."
+      "description": "A panel above the prompt: context usage, session / weekly / Fable limits, and prompt-cache temperature, with Clear, Compact and Warm (keeps the cache from going cold while you are away), and the price of each message and of what Clear or Compact saved."
     }
   ],
   "description": "Chris Tandoh's Claude Code mods"

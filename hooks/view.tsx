@@ -229,23 +229,23 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
       <Button key="warm" label={actions.isWarming ? 'Stop' : 'Warm'} hotkey="w" onPress={actions.warm} />
     </Box>
   )
+  // The dot, then the bold lead (after a Clear or Compact) and the rest.
+  const noticeText = [
+    <Text key="dot" color={vm.noticeDot}>● </Text>,
+    vm.noticeLead ? <Text key="lead" color={TOKENS.notice} bold>{vm.noticeLead}</Text> : null,
+    <Text key="rest" color={TOKENS.notice}>{vm.notice.slice(vm.noticeLead.length)}</Text>,
+  ]
   const notice = vm.notice
     ? wide ? (
         <Box flexDirection="row" columnGap={1}>
           <Box flexGrow={1} flexShrink={1}>
-            <Text wrap="truncate">
-              <Text color={vm.cache.color}>● </Text>
-              <Text color={TOKENS.text2}>{vm.notice}</Text>
-            </Text>
+            <Text wrap="truncate">{noticeText}</Text>
           </Box>
           {buttons}
         </Box>
       ) : (
         <Box flexDirection="column">
-          <Text wrap="wrap">
-            <Text color={vm.cache.color}>● </Text>
-            <Text color={TOKENS.text2}>{vm.notice}</Text>
-          </Text>
+          <Text wrap="wrap">{noticeText}</Text>
           {buttons}
         </Box>
       )

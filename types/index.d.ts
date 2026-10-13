@@ -48,6 +48,17 @@ export type ContextCacheSnapshot = {
   cache: ContextCacheCache
   /** When this snapshot was taken, epoch milliseconds. */
   updatedAt: number
+  /** The session's model id, to price tokens; absent or null when not read yet. */
+  model?: string | null
+  /** What the last Clear or Compact took out of the context; shown until the next reply lands. */
+  saved?: ContextCacheSaved | null
+}
+
+/** A Clear or Compact: the context before and after it, in tokens. */
+export type ContextCacheSaved = {
+  kind: 'clear' | 'compact'
+  before: number
+  after: number
 }
 
 declare module 'claude-code' {

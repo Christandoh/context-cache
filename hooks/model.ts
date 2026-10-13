@@ -9,6 +9,7 @@ import type {
   ContextCacheGroup,
   ContextCacheLimit,
   ContextCacheLimitKind,
+  ContextCacheSaved,
   ContextCacheSnapshot,
 } from '../types'
 
@@ -22,6 +23,10 @@ export const TOKENS = {
   ringTrack: '#3a3835',
   text: '#ece9e2',
   text2: '#b9b5ab',
+  /** The notice line: text2 lifted 20%. */
+  notice: '#ded9cd',
+  /** The dot beside a notice that reports what Clear or Compact saved. */
+  saved: '#4fae6a',
   text3: '#8a867d',
   text4: '#7d7970',
   tick: '#ece9e2',
@@ -74,6 +79,40 @@ export const TTL_1H = HOUR
 // ── Formatting ─────────────────────────────────────────────────────────────
 
 /** 452000 → "452k", 1000000 → "1M", 1500000 → "1.5M", 640 → "640". */
+// ── Prices ─────────────────────────────────────────────────────────────────
+
+// ponytail: list prices copied by hand ($ per million tokens: input, cache
+// read), as of 2026-10-13; update when Anthropic changes them. Matched by
+// prefix, most specific first, so `claude-opus-5-5[1m]` finds Opus 5.5.
+const PRICES: [string, number, number][] = [
+  ['claude-fable-5-1', 10, 0.25],
+  ['claude-mythos-5-1', 10, 0.25],
+  ['claude-fable-5', 10, 1],
+  ['claude-mythos-5', 10, 1],
+  ['claude-opus-5-5', 4, 0.2],
+  ['claude-opus-5', 5, 0.5],
+  ['claude-opus-4', 5, 0.5],
+  ['claude-sonnet-5', 2, 0.2],
+  ['claude-sonnet-4', 3, 0.3],
+  ['claude-haiku-5-5', 0.1, 0.01],
+  ['claude-haiku-4', 1, 0.1],
+]
+
+/** $ per token to read the cache, and to write it (2× input for the 1-hour cache, 1.25× for 5 minutes); null for an unknown model. */
+export type Price = { read: number; write: number }
+
+export function priceOf(model: string | null | undefined, ttlMs: number): Price | null {
+  const row = model ? PRICES.find(([p]) => model.startsWith(p)) : undefined
+  if (!row) return null
+  return { read: row[2] / 1e6, write: (row[1] * (ttlMs === TTL_5M ? 1.25 : 2)) / 1e6 }
+}
+
+/** "≈$3.61", "≈$0.09", "<$0.01". */
+export function fmtUsd(n: number): string {
+  if (n < 0.005) return '<$0.01'
+  return `≈$${n < 100 ? n.toFixed(2) : Math.round(n)}`
+}
+
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) {
     const m = n / 1_000_000
@@ -376,24 +415,67 @@ export function cacheView(cache: ContextCacheCache, now: number): CacheView {
  * The notice line's copy. Always a line: the row with Clear / Compact / Warm never hides.
  * `short`: the wording for every layout below the widest, short enough to stay on one line.
  */
-export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number, short = false): string {
+export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number, short = false, price: Price | null = null): string {
   if (!context) return cache.state === 'empty' ? 'Cache empty: nothing cached yet.' : `Cache ${cache.label.toLowerCase()}: reading context size…`
   const tokens = fmtTokens(context.used)
-  if (cache.state === 'empty') return short ? `Cache empty: writes ${tokens}.` : `Cache empty: next message writes ${tokens} to cache.`
+  // With a known price: what reading the cache costs, and what writing it again costs.
+  const read = price ? fmtUsd(context.used * price.read) : ''
+  const write = price ? fmtUsd(context.used * price.write) : ''
+  const more = price ? fmtUsd(context.used * (price.write - price.read)) : ''
+  if (cache.state === 'empty') {
+    if (short) return price ? `Cache empty: writes ${tokens} (${write}).` : `Cache empty: writes ${tokens}.`
+    return price ? `Cache empty: next message writes ${tokens} to cache for ${write}.` : `Cache empty: next message writes ${tokens} to cache.`
+  }
   if (cache.state === 'warm') {
     const usedPct = (context.used / context.window) * 100
     if (context.autoCompactAt !== null && usedPct >= 85) {
       const away = Math.max(0, pct((context.autoCompactAt / context.window) * 100 - usedPct))
-      return short ? `Warm: reuses ${tokens}. Compact ${away}% away.` : `Cache warm: next message reuses ${tokens}. Auto-compact is ${away}% away.`
+      if (short) return `Warm: reuses ${tokens}. Compact ${away}% away.`
+      return price
+        ? `Cache warm: next message reuses ${tokens} for ${read}. Auto-compact is ${away}% away.`
+        : `Cache warm: next message reuses ${tokens}. Auto-compact is ${away}% away.`
     }
-    return short ? `Cache warm: reuses ${tokens}.` : `Cache warm: next message reuses ${tokens} from cache.`
+    if (short) return price ? `Cache warm: reuses ${tokens} (${read}).` : `Cache warm: reuses ${tokens}.`
+    return price
+      ? `Cache warm: next message reuses ${tokens} for ${read} (${write} if it goes cold).`
+      : `Cache warm: next message reuses ${tokens} from cache.`
   }
   if (cache.state === 'cooling') {
     const within =
       ttlMs < 10 * 60_000 ? fmtSpan(cache.remainingMs, true) : `${Math.max(1, Math.round(cache.remainingMs / 60_000))}m`
-    return short ? `Cooling: send within ${within}.` : `Cache cooling: send within ${within} to keep ${tokens} cached.`
+    if (short) return price ? `Cooling: send within ${within} (${more}).` : `Cooling: send within ${within}.`
+    return price
+      ? `Cache cooling: send within ${within} to keep ${tokens} cached, or pay ${more} more.`
+      : `Cache cooling: send within ${within} to keep ${tokens} cached.`
   }
-  return short ? `Cache cold: re-reads ${tokens}.` : `Cache cold: next message re-reads ${tokens}. Clear is free.`
+  if (short) return price ? `Cache cold: re-reads ${tokens} (${write}).` : `Cache cold: re-reads ${tokens}.`
+  return price ? `Cache cold: next message re-reads ${tokens} for ${write}. Clear is free.` : `Cache cold: next message re-reads ${tokens}. Clear is free.`
+}
+
+/**
+ * The notice after a Clear or Compact, until the next reply lands: a bold lead
+ * (what was taken out) and the rest (what each later message now costs less).
+ */
+export function savedNotice(saved: ContextCacheSaved, price: Price | null, short = false): { lead: string; rest: string } {
+  const freed = Math.max(0, saved.before - saved.after)
+  const lead =
+    saved.kind === 'clear' ? `Cleared ${fmtTokens(saved.before)}.` : `Compacted ${fmtTokens(saved.before)} → ${fmtTokens(saved.after)}.`
+  if (!price) return { lead, rest: short ? '' : ` Each message now sends ${fmtTokens(freed)} fewer tokens.` }
+  const warm = fmtUsd(freed * price.read)
+  const cold = fmtUsd(freed * price.write)
+  if (short) return { lead, rest: ` ${cold} less a message.` }
+  return saved.kind === 'clear'
+    ? { lead, rest: ` Next message costs ${cold} less, or ${warm} less while the cache is warm.` }
+    : { lead, rest: ` Each message sends ${fmtTokens(freed)} fewer: ${warm} less warm, ${cold} after a break.` }
+}
+
+/** The fewest words for a terminal line too narrow for any wording above. */
+export function tinyNotice(cache: CacheView, context: ContextCacheContext | null): string {
+  if (cache.state === 'cooling') return `Cooling: ${fmtSpan(cache.remainingMs)} left.`
+  if (cache.state === 'warm' && context?.autoCompactAt != null && context.used / context.window >= 0.85) {
+    return `Compact ${Math.max(0, pct(((context.autoCompactAt - context.used) / context.window) * 100))}% away.`
+  }
+  return `Cache ${cache.label.toLowerCase()}.`
 }
 
 /** Every layout below the widest takes the short notice wording: beside three buttons the full sentence wraps from about 620px down. */
@@ -439,15 +521,25 @@ export type ViewModel = {
   limits: LimitView[]
   cache: CacheView
   notice: string
+  /** The bold start of the notice (part of `notice`), or empty. */
+  noticeLead: string
+  /** The notice dot's colour: the cache's, or green after a Clear or Compact. */
+  noticeDot: string
   showLegend: boolean
   showDetail: boolean
 }
 
+/**
+ * `fitChars`, the terminal's: the cells the notice has on its line. The
+ * longest wording that fits is taken, down to the tiny one, so it never cuts
+ * off. Without it (the desktop), the size class picks the wording.
+ */
 export function buildView(
   snap: ContextCacheSnapshot,
   now: number,
   columns: number,
   maxRows: number,
+  fitChars?: number,
 ): ViewModel {
   let size = sizeClassOf(columns)
   const cache = cacheView(snap.cache, now)
@@ -455,7 +547,22 @@ export function buildView(
   while (size !== 'd' && rowsFor(size, true) > maxRows) {
     size = size === 'a' ? 'c' : size === 'b' ? 'c' : 'd'
   }
-  const notice = noticeText(cache, snap.context, snap.cache.ttlMs, isShortNotice(size))
+  const price = priceOf(snap.model, snap.cache.ttlMs)
+  const isShort = isShortNotice(size)
+  // Priced wordings first (long, then short), then the same without money;
+  // the desktop takes the one its size class names.
+  const options: { lead: string; rest: string }[] = [price, null].flatMap(p =>
+    [false, true].map(short =>
+      snap.saved ? savedNotice(snap.saved, p, short) : { lead: '', rest: noticeText(cache, snap.context, snap.cache.ttlMs, short, p) },
+    ),
+  )
+  if (!snap.saved) options.push({ lead: '', rest: tinyNotice(cache, snap.context) })
+  const chosen =
+    fitChars === undefined
+      ? options[isShort ? 1 : 0]
+      : (options.find(o => (o.lead + o.rest).length <= fitChars) ?? options[options.length - 1])
+  const saved = snap.saved ? chosen : null
+  const notice = chosen.lead + chosen.rest
 
   const ctx = snap.context
   const context = ctx
@@ -494,6 +601,8 @@ export function buildView(
     limits,
     cache,
     notice,
+    noticeLead: saved ? saved.lead : '',
+    noticeDot: saved ? TOKENS.saved : cache.color,
     showLegend: size !== 'd',
     showDetail: size === 'a' || size === 'b',
   }
