@@ -373,7 +373,7 @@ export function cacheView(cache: ContextCacheCache, now: number): CacheView {
 }
 
 /**
- * The notice line's copy. Always a line: the row with Clear / Compact never hides.
+ * The notice line's copy. Always a line: the row with Clear / Compact / Warm never hides.
  * `short`: the wording for every layout below the widest, short enough to stay on one line.
  */
 export function noticeText(cache: CacheView, context: ContextCacheContext | null, ttlMs: number, short = false): string {

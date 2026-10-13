@@ -271,7 +271,7 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
 //
 // The design at its real pixel sizes: hooks/panel-svg.ts lays rows 1–3 (and a
 // narrow layout's notice) out as one SVG, the host draws the card around it
-// and its own buttons for Clear / Compact. The SVG is drawn at the
+// and its own buttons for Clear / Compact / Warm. The SVG is drawn at the
 // width the band is believed to be (cells × px per cell, see /cache scale);
 // where the slot is narrower the host scales it down to fit, so it always
 // fills the width whole and resizes without reflowing.

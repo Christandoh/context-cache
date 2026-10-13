@@ -1,12 +1,13 @@
 // context-cache: a panel above the prompt with context usage, usage limits
-// (session, weekly, Fable) and prompt-cache temperature, plus Clear / Compact.
+// (session, weekly, Fable) and prompt-cache temperature, plus Clear / Compact / Warm.
 //
 // Where each number comes from (all real, nothing sampled):
 // - Context: $.session.usage() (the status line's figures) and its /context
 //   breakdown; Files is the share of Messages that is file contents read.
 // - Limits: the account usage endpoint (api.anthropic.com/api/oauth/usage),
 //   called with the session's own credential through the host; falls back to
-//   the rate-limit headers of the last response.
+//   the rate-limit headers of the last response, then to the last good
+//   account reading any session saved (windows that have reset are dropped).
 // - Cache: the time of the last main-thread response, the TTL the responses
 //   were cached with (read from the transcript's usage, or the engine's own
 //   model-switch report), and the last turn's cache-read share.
@@ -223,6 +224,7 @@ async function fetchAccount($: EngineInterface, now: number, force: boolean) {
     if (limits.length > 0) {
       accountLimits = limits
       accountAt = now
+      await $.store.set('accountLimits', { at: now, limits })
     }
   } catch (err) {
     // keep the last good reading; the response headers cover the gap
@@ -301,9 +303,16 @@ async function doRefresh($: EngineInterface, forceAccount: boolean) {
   } else if (responseLimits.length > 0) {
     limits = responseLimits
     limitsSource = 'response'
-  } else {
+  } else if (prev.limits.length > 0) {
     limits = prev.limits
     limitsSource = prev.limitsSource
+  } else {
+    // Nothing read in this session yet (a reopened old chat before its first
+    // reply): the last good account reading from any session, minus windows
+    // that have reset since. It is replaced by the next real reading.
+    const saved = (await $.store.get('accountLimits')) as { limits?: ContextCacheLimit[] } | undefined
+    limits = (saved?.limits ?? []).filter(l => l.resetsAt !== null && l.resetsAt > now)
+    limitsSource = limits.length > 0 ? 'account' : 'none'
   }
 
   await update($, snapshotAtom, latest => {
