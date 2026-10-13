@@ -14,3 +14,5 @@ scripts/package.json
 scripts/package-lock.json
 # kept on disk, not published: the handoff between sessions
 HANDOFF.md
+# kept on disk, not published: copies the source into the plugin cache
+scripts/sync-cache.mjs
