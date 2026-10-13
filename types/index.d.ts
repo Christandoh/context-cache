@@ -52,6 +52,8 @@ export type ContextCacheSnapshot = {
   model?: string | null
   /** What the last Clear or Compact took out of the context; shown until the next reply lands. */
   saved?: ContextCacheSaved | null
+  /** When each limit's bar last turned amber or red, epoch milliseconds: it pulses for a few seconds. */
+  pulse?: Partial<Record<ContextCacheLimitKind, number>>
   /** While Warm runs: filled in when the panel is drawn, from the warming state. */
   warming?: ContextCacheWarming | null
 }

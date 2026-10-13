@@ -31,9 +31,13 @@ import {
   sizeClassOf,
   type ViewModel,
   fileShareOf,
+  isPulseLit,
+  limitToast,
   limitsFromResponse,
   listPrice,
   parseAccountUsage,
+  timePct,
+  toneOf,
   TTL_1H,
   TTL_5M,
   usageWindowsOf,
@@ -348,11 +352,40 @@ async function doRefresh($: EngineInterface, forceAccount: boolean) {
     // keep the last one read; without it the notice leaves out prices
   }
 
+  // A bar that just turned amber or red pulses; one already so when the session opened does not.
+  const rank = { normal: 0, amber: 1, red: 2 } as const
+  const toneAt = (l: ContextCacheLimit) => rank[toneOf(l.usage, timePct(l, now))]
+  const pulse = { ...prev.pulse }
+  for (const l of limits) {
+    const was = prev.limits.find(p => p.kind === l.kind)
+    if (was && toneAt(l) > toneAt(was)) pulse[l.kind] = now
+  }
+  await warnLimits($, limits, now)
+
   await update($, snapshotAtom, latest => {
     const s = latest ?? prev
-    return { ...s, context, limits, limitsSource, model, updatedAt: now }
+    return { ...s, context, limits, limitsSource, model, pulse, updatedAt: now }
   })
   await update($, nowAtom, () => now)
+}
+
+/**
+ * One toast as a limit reaches 90%, once per window across every session: the
+ * windows already warned about are kept in the store until they reset.
+ */
+async function warnLimits($: EngineInterface, limits: ContextCacheLimit[], now: number) {
+  const due = limits.filter(l => l.usage >= 90 && l.resetsAt !== null && l.resetsAt > now)
+  if (due.length === 0) return
+  const warned = (((await $.store.get('limitWarned')) as string[] | undefined) ?? []).map(k => {
+    const [kind, at] = k.split('@')
+    return { kind, at: Number(at) }
+  })
+  // The sources round reset times differently: within SAME_WINDOW_MS is the same window.
+  const fresh = due.filter(l => !warned.some(w => w.kind === l.kind && Math.abs(w.at - l.resetsAt!) < SAME_WINDOW_MS))
+  if (fresh.length === 0) return
+  const keep = warned.filter(w => w.at > now).map(w => `${w.kind}@${w.at}`)
+  await $.store.set('limitWarned', [...keep, ...fresh.map(l => `${l.kind}@${l.resetsAt}`)])
+  for (const l of fresh) $.ui.toast(limitToast(l, now))
 }
 
 function refresh($: EngineInterface, forceAccount = false): Promise<void> {
@@ -612,10 +645,11 @@ export const register: Register = on => {
     $.clock.every(1000, () => {
       void (async () => {
         const [snap, hidden] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom)])
-        if (hidden || !snap || snap.cache.lastAt === null) return
+        if (hidden || !snap) return
         const now = await $.clock.now()
         const c = cacheView(snap.cache, now)
-        const shown = `${c.state}|${pct(c.warmth * 100)}|${c.detail}|${c.state === 'cooling' ? noticeText(c, snap.context, snap.cache.ttlMs) : ''}`
+        const lit = Object.values(snap.pulse ?? {}).map(at => (isPulseLit(at, now) ? 1 : 0)).join('')
+        const shown = `${c.state}|${pct(c.warmth * 100)}|${c.detail}|${c.state === 'cooling' ? noticeText(c, snap.context, snap.cache.ttlMs) : ''}|${lit}`
         if (shown === lastShown) return
         lastShown = shown
         await update($, nowAtom, () => now)

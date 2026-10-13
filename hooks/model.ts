@@ -342,7 +342,17 @@ export function toneOf(usage: number, time: number | null): LimitTone {
   return 'normal'
 }
 
-export function limitView(kind: ContextCacheLimitKind, limit: ContextCacheLimit | undefined, now: number): LimitView {
+/** How long a bar pulses after turning amber or red: lit, off, lit, off, a second each. */
+export const PULSE_MS = 4000
+
+/** Whether a pulse that began at `at` is lit at `now`. */
+export function isPulseLit(at: number | undefined, now: number): boolean {
+  if (at === undefined) return false
+  const t = now - at
+  return t >= 0 && t < PULSE_MS && Math.floor(t / 1000) % 2 === 0
+}
+
+export function limitView(kind: ContextCacheLimitKind, limit: ContextCacheLimit | undefined, now: number, pulseAt?: number): LimitView {
   if (!limit) {
     const base = LIMIT_COLORS[kind]
     return { kind, title: LIMIT_TITLES[kind], usage: null, time: null, tone: 'normal', ...base, reset: 'No reading yet' }
@@ -357,8 +367,17 @@ export function limitView(kind: ContextCacheLimitKind, limit: ContextCacheLimit 
     time,
     tone,
     ...colors,
+    ...(isPulseLit(pulseAt, now) ? { bright: mix(colors.bright, '#ffffff', 0.5) } : {}),
     reset: fmtReset(limit.resetsAt, now),
   }
+}
+
+const SHORT_TITLES: Record<ContextCacheLimitKind, string> = { session: 'Session', weekly: 'Weekly', fable: 'Fable' }
+
+/** The one-time toast as a limit reaches 90%: "Weekly at 90%, resets Sat 11:00 pm." */
+export function limitToast(limit: ContextCacheLimit, now: number): string {
+  const reset = fmtReset(limit.resetsAt, now)
+  return `${SHORT_TITLES[limit.kind]} at ${pct(limit.usage)}%, ${reset.charAt(0).toLowerCase()}${reset.slice(1)}.`
 }
 
 // ── Cache ──────────────────────────────────────────────────────────────────
@@ -613,7 +632,7 @@ export function buildView(
     : null
 
   const byKind = (k: ContextCacheLimitKind) => snap.limits.find(l => l.kind === k)
-  const limits = (['session', 'weekly', 'fable'] as const).map(k => limitView(k, byKind(k), now))
+  const limits = (['session', 'weekly', 'fable'] as const).map(k => limitView(k, byKind(k), now, snap.pulse?.[k]))
 
   return {
     size,
