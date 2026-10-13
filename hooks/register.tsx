@@ -25,6 +25,8 @@ import {
   isShortNotice,
   fmtClock,
   fmtTokens,
+  fmtUsd,
+  priceOf,
   noticeText,
   pct,
   sizeClassOf,
@@ -152,6 +154,7 @@ async function statusReport($: EngineInterface): Promise<string> {
     `Limits: ${snap?.limits.length ? snap.limits.map(l => `${l.kind} ${l.usage}%`).join(', ') : 'none'} (source: ${snap?.limitsSource ?? 'none'})`,
     `Account usage request: ${account}`,
     `Cache: last write ${snap?.cache.lastAt ? new Date(snap.cache.lastAt).toISOString() : 'none'}, TTL ${snap ? snap.cache.ttlMs / 60000 : '?'}m${snap?.cache.isTtlKnown ? '' : ' (default)'}`,
+    ...tallyLines(await readTally($)),
     `Warming: ${warmUntil === null ? 'off' : `on until ${fmtClock(warmUntil)}; ${snap ? (await warmNote($, snap)) || 'no note' : 'no snapshot'}`}`,
     `Full report: ${cwd ? `${cwd}/` : ''}${DIAG_FILE}`,
   ]
@@ -350,6 +353,38 @@ async function noteSaved($: EngineInterface, kind: 'clear' | 'compact', before: 
   const after = (await current($)).context?.used ?? 0
   if (before === null || before <= after) return
   await update($, snapshotAtom, s => (s ? { ...s, saved: { kind, before, after } } : s))
+  const snap = await current($)
+  const price = priceOf(snap.model, snap.cache.ttlMs)
+  await addToTally($, { freed: before - after, freedUsd: price ? (before - after) * price.write : 0 })
+}
+
+// What Clear, Compact and Warm saved today (local day), kept across sessions
+// for /cache-status. Money is the cache re-write each one spared, at list price.
+type Tally = { day: string; freed: number; freedUsd: number; pings: number; pingUsd: number }
+
+async function readTally($: EngineInterface): Promise<Tally> {
+  const day = new Date(await $.clock.now()).toDateString()
+  const t = (await $.store.get('tally')) as Tally | undefined
+  return t && t.day === day ? t : { day, freed: 0, freedUsd: 0, pings: 0, pingUsd: 0 }
+}
+
+async function addToTally($: EngineInterface, add: Partial<Omit<Tally, 'day'>>) {
+  const t = await readTally($)
+  await $.store.set('tally', {
+    day: t.day,
+    freed: t.freed + (add.freed ?? 0),
+    freedUsd: t.freedUsd + (add.freedUsd ?? 0),
+    pings: t.pings + (add.pings ?? 0),
+    pingUsd: t.pingUsd + (add.pingUsd ?? 0),
+  })
+}
+
+function tallyLines(t: Tally): string[] {
+  const money = (usd: number) => (usd > 0 ? ` (up to ${fmtUsd(usd)} of cache re-writes)` : '')
+  return [
+    `Saved today by Clear and Compact: ${t.freed > 0 ? `${fmtTokens(t.freed)} taken out of the context${money(t.freedUsd)}` : 'nothing yet'}`,
+    `Saved today by Warm: ${t.pings > 0 ? `${t.pings} ping${t.pings === 1 ? '' : 's'} kept the cache${t.pingUsd > 0 ? `, ${fmtUsd(t.pingUsd)} of re-writes avoided after paying for the pings` : ''}` : 'no pings yet'}`,
+  ]
 }
 
 async function learnTtl($: EngineInterface, transcriptPath: string) {
@@ -369,7 +404,7 @@ const PANE = 'context-cache'
 
 const COMMANDS = [
   { name: 'cache', description: 'Context & cache panel: show or hide it' },
-  { name: 'cache-status', description: 'Context & cache panel: where each figure comes from (surfaces, draws, the account usage request, Fable)' },
+  { name: 'cache-status', description: 'Context & cache panel: where each figure comes from (surfaces, draws, the account usage request, Fable) and what was saved today' },
   { name: 'cache-pane', description: 'Context & cache panel: open it as a pane (the way it shows on mobile)' },
   { name: 'cache-refresh', description: 'Context & cache panel: re-read usage now' },
   { name: 'cache-scale', description: 'Context & cache panel: px per cell the desktop draws at (default 8); a number sets it, none steps it', argumentHint: '[px]' },
@@ -451,6 +486,9 @@ async function warmTick($: EngineInterface) {
       const at = await $.clock.now()
       lastPing = { at, read: u.cache_read_input_tokens }
       await patchCache($, { lastAt: at })
+      // A ping pays a cache read and spares the re-write going cold would cost.
+      const price = priceOf((await current($)).model, cache.ttlMs)
+      await addToTally($, { pings: 1, pingUsd: price ? u.cache_read_input_tokens * (price.write - price.read) : 0 })
       $.ui.toast(`Kept the cache warm at ${fmtClock(at)} (read ${fmtTokens(u.cache_read_input_tokens)} from cache). Next ping ${fmtClock(at + WARM_AFTER_MS)}.`)
     }
     else if (u && u.cache_creation_input_tokens > 0) await stopWarm($, 'the ping missed the cache and rewrote it')
@@ -600,6 +638,11 @@ export const register: Register = on => {
 
   // The engine reports the TTL itself on a model switch; a switch also forfeits the cache.
   on('classic.PostModelSwitch', async ($, e, next) => {
+    // A switch throws away a warm cache: say what the next message pays to write it again.
+    if (e.prompt_cache_warm && e.context_tokens > 0 && e.source !== 'resume') {
+      const usd = e.pricing === 'default' ? '' : ` for ${fmtUsd(e.estimated_cache_write_usd)}`
+      $.ui.toast(`Model switched: the warm cache is gone. The next message re-writes ${fmtTokens(e.context_tokens)}${usd}.`)
+    }
     await setTtl($, e.cache_ttl === '5m' ? TTL_5M : TTL_1H)
     await patchCache($, { lastAt: null, hitRate: null })
     void refresh($)

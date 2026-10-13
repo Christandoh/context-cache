@@ -30,6 +30,8 @@ The bottom row is a one-line notice about the cache with three buttons. Clear ru
 
 Warm, new in 0.1.6, keeps the cache from going cold while you're away. 55 minutes after the last reply it sends a hidden one-line ping over the conversation. The ping reads the cache at a tenth of the price and resets its hour, so it costs about a twentieth of a cold re-read. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache. With the 5-minute cache, pinging that often would cost more than letting it go cold.
 
+Switching model throws the cache away, because each model keeps its own. When the cache was still warm, a toast says so and gives the size and price of the re-write the next message pays. Claude Code itself supplies that price.
+
 The row never hides, whatever the cache holds, so the buttons are always there. With nothing cached yet, in a fresh session or after `/clear` or a compaction, it says how much the next message will write to the cache.
 
 ![900 px, nothing cached yet, drawn from the mod's layout code](docs/empty-900.png)
@@ -61,7 +63,7 @@ Two limits of the platform worth knowing. The desktop app's ordinary chat has no
 
 `/cache` hides or shows the card.
 
-`/cache-status` prints a diagnostics report. It lists which apps are attached, what the mod has drawn, where each figure came from, whether warming is on, and how the last account usage request went, down to the HTTP status and which window matched Fable. The full report also lands in `context-cache-status.json` in the session's working directory.
+`/cache-status` prints a diagnostics report. It lists which apps are attached, what the mod has drawn, where each figure came from, whether warming is on, and how the last account usage request went, down to the HTTP status and which window matched Fable. It also totals what was saved today: the tokens Clear and Compact took out, and the Warm pings that kept the cache, each with the cache re-write it spared at list price. The full report also lands in `context-cache-status.json` in the session's working directory.
 
 `/cache-pane` opens the card as a pane, on any device.
 
