@@ -637,9 +637,23 @@ export const register: Register = on => {
   }).catch((_$, e, next) => next(e))
 
   // The engine reports the TTL itself on a model switch; a switch also forfeits the cache.
+  // Before a switch you asked for: a warm cache would be thrown away, so ask
+  // first, with what the next message pays to write it again.
+  on('classic.PreModelSwitch', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.prompt_cache_warm || e.context_tokens <= 0 || result.permissionDecision) return result
+    const usd = e.pricing === 'default' ? '' : ` for ${fmtUsd(e.estimated_cache_write_usd)}`
+    return {
+      ...result,
+      permissionDecision: 'ask' as const,
+      permissionDecisionReason: `Switching model throws away the warm cache: the next message re-writes ${fmtTokens(e.context_tokens)}${usd}. Switch anyway?`,
+    }
+  }).catch((_$, e, next) => next(e))
+
   on('classic.PostModelSwitch', async ($, e, next) => {
-    // A switch throws away a warm cache: say what the next message pays to write it again.
-    if (e.prompt_cache_warm && e.context_tokens > 0 && e.source !== 'resume') {
+    // A switch nobody was asked about (an automatic fallback) still throws a
+    // warm cache away: say what the next message pays to write it again.
+    if (e.prompt_cache_warm && e.context_tokens > 0 && e.source === 'auto') {
       const usd = e.pricing === 'default' ? '' : ` for ${fmtUsd(e.estimated_cache_write_usd)}`
       $.ui.toast(`Model switched: the warm cache is gone. The next message re-writes ${fmtTokens(e.context_tokens)}${usd}.`)
     }
