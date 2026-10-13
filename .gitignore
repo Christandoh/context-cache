@@ -12,3 +12,5 @@ tests/
 scripts/cards.mts
 scripts/package.json
 scripts/package-lock.json
+# kept on disk, not published: the handoff between sessions
+HANDOFF.md
