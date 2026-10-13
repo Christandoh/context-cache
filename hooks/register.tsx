@@ -23,6 +23,7 @@ import {
   buildView,
   cacheView,
   fmtClock,
+  fmtSpan,
   fmtTokens,
   fmtUsd,
   priceOf,
@@ -163,6 +164,7 @@ async function statusReport($: EngineInterface): Promise<string> {
     priceLine(snap?.model),
     ...tallyLines(await readDays($)),
     `Warming: ${warmUntil === null ? 'off' : `on until ${fmtClock(warmUntil)}; ${warming ? warmNotice(warming, snap!.context)[0] : 'no note'}`}`,
+    `Auto-warm: ${(await autoWarmAt($)) === 0 ? 'off (/cache-autowarm sets it)' : `when quiet with a context over ${fmtTokens(await autoWarmAt($))}${autoHeld ? '; held off until the next reply' : ''}`}`,
     `Full report: ${cwd ? `${cwd}/` : ''}${DIAG_FILE}`,
   ]
   const text = lines.join('\n')
@@ -499,6 +501,11 @@ const COMMANDS = [
   { name: 'cache-pane', description: 'Context & cache panel: open it as a pane (the way it shows on mobile)' },
   { name: 'cache-refresh', description: 'Context & cache panel: re-read usage now' },
   { name: 'cache-scale', description: 'Context & cache panel: px per cell the desktop draws at (default 8); a number sets it, none steps it', argumentHint: '[px]' },
+  {
+    name: 'cache-autowarm',
+    description: 'Context & cache panel: switch Warm on by itself when you go quiet with a context over this many thousand tokens; 0 is off, none steps off/200/300/500',
+    argumentHint: '[k tokens]',
+  },
 ] as const
 
 async function hasMobile($: EngineInterface): Promise<boolean> {
@@ -547,16 +554,54 @@ function whyNoWarm(cache: ContextCacheCache, now: number): string | null {
 }
 
 async function stopWarm($: EngineInterface, why: string) {
+  autoHeld = true
   await update($, warmUntilAtom, () => null)
   $.ui.toast(`Warming stopped: ${why}.`)
 }
 
-/** Checked every 15s while warming: pings once the cache is 55 min old. */
+// Auto-warm: Warm switches itself on once you have been quiet 55 minutes with
+// a context over the size /cache-autowarm set (off until set). Stop, or warming
+// stopping by itself, holds it off until the next reply.
+const AUTO_STEPS = [0, 200_000, 300_000, 500_000]
+let autoHeld = false
+/** The reply (cache.lastAt) the 5-minutes-left notice was raised for. */
+let coldSoonFor: number | null = null
+
+async function autoWarmAt($: EngineInterface): Promise<number> {
+  const v = await $.store.get('autoWarmAt')
+  return typeof v === 'number' && v > 0 ? v : 0
+}
+
+/** 5 minutes left and nothing will keep the cache: a notification, or a toast where nothing can notify (the desktop). */
+async function coldSoon($: EngineInterface, snap: ContextCacheSnapshot, now: number) {
+  const { cache, context } = snap
+  if (cache.lastAt === null || coldSoonFor === cache.lastAt) return
+  coldSoonFor = cache.lastAt
+  const price = priceOf(snap.model, cache.ttlMs)
+  const tokens = context ? fmtTokens(context.used) : 'the conversation'
+  const text =
+    `Cache goes cold in ${fmtSpan(cache.lastAt + cache.ttlMs - now)}: send a message to keep ${tokens} cached` +
+    (price && context ? `, or the next one re-writes it for ${fmtUsd(context.used * price.write)}.` : '.')
+  const sent = await $.ui.notify(text, { title: 'Context & cache' }).catch(() => ({ isSent: false as const }))
+  if (!sent.isSent) $.ui.toast(text)
+}
+
+/** Checked every 15s: pings once the cache is 55 min old while warming; otherwise auto-warm or the 5-minutes-left notice. */
 async function warmTick($: EngineInterface) {
-  const until = await read($, warmUntilAtom)
-  if (until === null || warmInFlight) return
+  if (warmInFlight) return
+  let until = await read($, warmUntilAtom)
   const now = await $.clock.now()
-  const { cache } = await current($)
+  const snap = await current($)
+  const { cache } = snap
+  if (until === null) {
+    if (cache.lastAt === null || whyNoWarm(cache, now) || now - cache.lastAt < WARM_AFTER_MS) return
+    const at = await autoWarmAt($)
+    if (autoHeld || at === 0 || (snap.context?.used ?? 0) < at) return coldSoon($, snap, now)
+    until = now + WARM_FOR_MS
+    lastPing = null
+    await update($, warmUntilAtom, () => until)
+    $.ui.toast(`Auto-warm: the context (${fmtTokens(snap.context!.used)}) is over ${fmtTokens(at)}, so Warm switched on. Press Stop to end it.`)
+  }
   if (now >= until) return stopWarm($, 'it ran for 8 hours')
   const why = whyNoWarm(cache, now)
   if (why) return stopWarm($, why)
@@ -589,6 +634,7 @@ async function actionsFor($: EngineInterface, isWorking: boolean): Promise<Actio
     isWarming,
     warm: async () => {
       if ((await read($, warmUntilAtom)) !== null) {
+        autoHeld = true
         await update($, warmUntilAtom, () => null)
         $.ui.toast('Warming stopped.')
         return
@@ -678,6 +724,7 @@ export const register: Register = on => {
     const r = yield* next(e)
     const u = r.usage
     if (e.agentId === undefined && u) {
+      autoHeld = false // a reply: auto-warm may act again on the next quiet spell
       const total = u.cache_read_input_tokens + u.cache_creation_input_tokens + u.input_tokens
       void $.clock
         .now()
@@ -793,6 +840,19 @@ export const register: Register = on => {
     await $.store.set('pxPerCell', n)
     await update($, pxPerCellAtom, () => n)
     return { text: `Desktop now draws at ${n} px per cell (was ${was}). Run it again to step up; /cache-scale <px> sets it outright.` }
+  })
+
+  on('command.run', { command: 'cache-autowarm' }, async ($, e) => {
+    const was = await autoWarmAt($)
+    const typed = e.args.trim() === '' ? NaN : Number(e.args.trim())
+    // No number typed (or none delivered): the next step after the current one.
+    const n = Number.isFinite(typed) && typed >= 0 ? Math.round(typed * 1000) : AUTO_STEPS[(AUTO_STEPS.indexOf(was) + 1) % AUTO_STEPS.length]!
+    await $.store.set('autoWarmAt', n)
+    const before = was === 0 ? 'off' : fmtTokens(was)
+    if (n === 0) return { text: `Auto-warm is off (was ${before}).` }
+    return {
+      text: `Auto-warm: Warm switches itself on when the context is over ${fmtTokens(n)} and you have been quiet ${WARM_AFTER_MS / 60_000} minutes (was ${before}). Each ping reads the cache; /cache-autowarm 0 turns it off.`,
+    }
   })
 
   on('command.run', { command: 'cache-pane' }, async $ => {
