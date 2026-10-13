@@ -32,6 +32,7 @@ import {
   type ViewModel,
   fileShareOf,
   limitsFromResponse,
+  listPrice,
   parseAccountUsage,
   TTL_1H,
   TTL_5M,
@@ -155,7 +156,8 @@ async function statusReport($: EngineInterface): Promise<string> {
     `Limits: ${snap?.limits.length ? snap.limits.map(l => `${l.kind} ${l.usage}%`).join(', ') : 'none'} (source: ${snap?.limitsSource ?? 'none'})`,
     `Account usage request: ${account}`,
     `Cache: last write ${snap?.cache.lastAt ? new Date(snap.cache.lastAt).toISOString() : 'none'}, TTL ${snap ? snap.cache.ttlMs / 60000 : '?'}m${snap?.cache.isTtlKnown ? '' : ' (default)'}`,
-    ...tallyLines(await readTally($)),
+    priceLine(snap?.model),
+    ...tallyLines(await readDays($)),
     `Warming: ${warmUntil === null ? 'off' : `on until ${fmtClock(warmUntil)}; ${warming ? warmNotice(warming, snap!.context)[0] : 'no note'}`}`,
     `Full report: ${cwd ? `${cwd}/` : ''}${DIAG_FILE}`,
   ]
@@ -376,33 +378,71 @@ async function noteSaved($: EngineInterface, kind: 'clear' | 'compact', before: 
   await addToTally($, { freed: before - after, freedUsd: price ? (before - after) * price.write : 0 })
 }
 
-// What Clear, Compact and Warm saved today (local day), kept across sessions
-// for /cache-status. Money is the cache re-write each one spared, at list price.
-type Tally = { day: string; freed: number; freedUsd: number; pings: number; pingUsd: number }
+// What Clear, Compact and Warm saved, per local day for the last 7, kept
+// across sessions for /cache-status. Money is the cache re-write each one
+// spared, at list price.
+type Totals = { freed: number; freedUsd: number; pings: number; pingUsd: number }
+type Days = Record<string, Totals>
+const NONE: Totals = { freed: 0, freedUsd: 0, pings: 0, pingUsd: 0 }
+const DAY_MS = 24 * 60 * 60_000
 
-async function readTally($: EngineInterface): Promise<Tally> {
-  const day = new Date(await $.clock.now()).toDateString()
-  const t = (await $.store.get('tally')) as Tally | undefined
-  return t && t.day === day ? t : { day, freed: 0, freedUsd: 0, pings: 0, pingUsd: 0 }
+/** "2026-10-13" in local time: keys that sort, unlike toDateString. */
+const dayKey = (at: number) => {
+  const d = new Date(at)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-async function addToTally($: EngineInterface, add: Partial<Omit<Tally, 'day'>>) {
-  const t = await readTally($)
-  await $.store.set('tally', {
-    day: t.day,
-    freed: t.freed + (add.freed ?? 0),
-    freedUsd: t.freedUsd + (add.freedUsd ?? 0),
-    pings: t.pings + (add.pings ?? 0),
-    pingUsd: t.pingUsd + (add.pingUsd ?? 0),
-  })
+/** The last 7 days' totals, today among them; older days dropped. */
+async function readDays($: EngineInterface): Promise<{ today: string; days: Days }> {
+  const now = await $.clock.now()
+  const today = dayKey(now)
+  const oldest = dayKey(now - 6 * DAY_MS)
+  let days = ((await $.store.get('tallyDays')) as Days | undefined) ?? {}
+  // Before 0.1.10 only today was kept, under 'tally'.
+  const old = (await $.store.get('tally')) as (Totals & { day: string }) | undefined
+  if (old && old.day === new Date(now).toDateString() && !days[today]) {
+    const { day: _, ...t } = old
+    days = { ...days, [today]: t }
+  }
+  return { today, days: Object.fromEntries(Object.entries(days).filter(([k]) => k >= oldest && k <= today)) }
 }
 
-function tallyLines(t: Tally): string[] {
+async function addToTally($: EngineInterface, add: Partial<Totals>) {
+  const { today, days } = await readDays($)
+  const t = days[today] ?? NONE
+  const sum = (k: keyof Totals) => t[k] + (add[k] ?? 0)
+  await $.store.set('tallyDays', { ...days, [today]: { freed: sum('freed'), freedUsd: sum('freedUsd'), pings: sum('pings'), pingUsd: sum('pingUsd') } })
+}
+
+function tallyLines({ today, days }: { today: string; days: Days }): string[] {
+  const t = days[today] ?? NONE
+  const w = Object.values(days).reduce<Totals>(
+    (a, d) => ({ freed: a.freed + d.freed, freedUsd: a.freedUsd + d.freedUsd, pings: a.pings + d.pings, pingUsd: a.pingUsd + d.pingUsd }),
+    NONE,
+  )
   const money = (usd: number) => (usd > 0 ? ` (up to ${fmtUsd(usd)} of cache re-writes)` : '')
+  const pings = (n: number) => `${n} Warm ping${n === 1 ? '' : 's'}`
+  const week =
+    w.freed === 0 && w.pings === 0
+      ? 'nothing yet'
+      : [
+          w.freed > 0 ? `${fmtTokens(w.freed)} taken out by Clear and Compact${w.freedUsd > 0 ? ` (up to ${fmtUsd(w.freedUsd)})` : ''}` : 'nothing taken out by Clear or Compact',
+          w.pings > 0 ? `${pings(w.pings)}${w.pingUsd > 0 ? ` (${fmtUsd(w.pingUsd)} of re-writes avoided)` : ''}` : 'no Warm pings',
+        ].join(', ')
   return [
     `Saved today by Clear and Compact: ${t.freed > 0 ? `${fmtTokens(t.freed)} taken out of the context${money(t.freedUsd)}` : 'nothing yet'}`,
     `Saved today by Warm: ${t.pings > 0 ? `${t.pings} ping${t.pings === 1 ? '' : 's'} kept the cache${t.pingUsd > 0 ? `, ${fmtUsd(t.pingUsd)} of re-writes avoided after paying for the pings` : ''}` : 'no pings yet'}`,
+    `Saved in the last 7 days: ${week}`,
   ]
+}
+
+/** Which list prices the money comes from, or that the model has none. */
+function priceLine(model: string | null | undefined): string {
+  if (!model) return 'Prices: the model is not known yet, so the panel shows tokens without money'
+  const p = listPrice(model)
+  return p
+    ? `Prices: ${model} at $${p.input} input, $${p.read} cache read per million tokens`
+    : `Prices: ${model} is not in the price list in hooks/model.ts, so the panel shows tokens without money`
 }
 
 async function learnTtl($: EngineInterface, transcriptPath: string) {

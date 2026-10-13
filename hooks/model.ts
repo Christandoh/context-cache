@@ -102,10 +102,16 @@ const PRICES: [string, number, number][] = [
 /** $ per token to read the cache, and to write it (2× input for the 1-hour cache, 1.25× for 5 minutes); null for an unknown model. */
 export type Price = { read: number; write: number }
 
-export function priceOf(model: string | null | undefined, ttlMs: number): Price | null {
+/** The list prices in $ per million tokens, or null for a model missing from the list. */
+export function listPrice(model: string | null | undefined): { input: number; read: number } | null {
   const row = model ? PRICES.find(([p]) => model.startsWith(p)) : undefined
-  if (!row) return null
-  return { read: row[2] / 1e6, write: (row[1] * (ttlMs === TTL_5M ? 1.25 : 2)) / 1e6 }
+  return row ? { input: row[1], read: row[2] } : null
+}
+
+export function priceOf(model: string | null | undefined, ttlMs: number): Price | null {
+  const list = listPrice(model)
+  if (!list) return null
+  return { read: list.read / 1e6, write: (list.input * (ttlMs === TTL_5M ? 1.25 : 2)) / 1e6 }
 }
 
 /** "≈$3.61", "≈$0.09", "<$0.01". */
