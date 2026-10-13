@@ -17,12 +17,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ContextCacheCache, ContextCacheLimit, ContextCacheSnapshot } from '../types'
+import type { ContextCacheCache, ContextCacheLimit, ContextCacheSnapshot, ContextCacheWarming } from '../types'
 import {
   buildContext,
   buildView,
   cacheView,
-  isShortNotice,
   fmtClock,
   fmtTokens,
   fmtUsd,
@@ -37,6 +36,7 @@ import {
   TTL_1H,
   TTL_5M,
   usageWindowsOf,
+  warmNotice,
 } from './model'
 import { renderDesktop, renderTerminal, type Actions } from './view'
 
@@ -138,6 +138,7 @@ async function statusReport($: EngineInterface): Promise<string> {
     read($, pxPerCellAtom),
     read($, warmUntilAtom),
   ])
+  const warming = snap ? await warmingOf($, snap) : null
   const drawn = Object.entries(draws).map(([k, n]) => `${k} ×${n}`).join(', ') || 'nothing yet'
   const a = lastAccount
   const account = a
@@ -155,7 +156,7 @@ async function statusReport($: EngineInterface): Promise<string> {
     `Account usage request: ${account}`,
     `Cache: last write ${snap?.cache.lastAt ? new Date(snap.cache.lastAt).toISOString() : 'none'}, TTL ${snap ? snap.cache.ttlMs / 60000 : '?'}m${snap?.cache.isTtlKnown ? '' : ' (default)'}`,
     ...tallyLines(await readTally($)),
-    `Warming: ${warmUntil === null ? 'off' : `on until ${fmtClock(warmUntil)}; ${snap ? (await warmNote($, snap)) || 'no note' : 'no snapshot'}`}`,
+    `Warming: ${warmUntil === null ? 'off' : `on until ${fmtClock(warmUntil)}; ${warming ? warmNotice(warming, snap!.context)[0] : 'no note'}`}`,
     `Full report: ${cwd ? `${cwd}/` : ''}${DIAG_FILE}`,
   ]
   const text = lines.join('\n')
@@ -438,20 +439,13 @@ function designCells(px: number): number {
 async function panelModel($: EngineInterface, columns: number, maxRows: number, fitChars?: number): Promise<ViewModel | null> {
   const [snap, hidden, tick] = await Promise.all([read($, snapshotAtom), read($, hiddenAtom), read($, nowAtom)])
   if (hidden || !snap) return null
-  const vm = buildView(snap, Math.max(tick, snap.updatedAt), columns, maxRows, fitChars)
-  if (snap.saved) return vm
-  const warm = await warmNote($, snap, isShortNotice(vm.size))
-  return warm ? { ...vm, notice: warm } : vm
+  return buildView({ ...snap, warming: await warmingOf($, snap) }, Math.max(tick, snap.updatedAt), columns, maxRows, fitChars)
 }
 
-/** While warming, the notice line in place of the usual one, kept as short: the last ping and the next. */
-async function warmNote($: EngineInterface, { cache, context }: ContextCacheSnapshot, short = false): Promise<string> {
-  if ((await read($, warmUntilAtom)) === null || cache.lastAt === null) return ''
-  const next = fmtClock(cache.lastAt + WARM_AFTER_MS)
-  if (short) return lastPing ? `Warmed ${fmtClock(lastPing.at)}, next ${next}.` : `Kept warm: next ping ${next}.`
-  return lastPing
-    ? `Kept warm at ${fmtClock(lastPing.at)}, reuses ${fmtTokens(lastPing.read)}. Next ${next}.`
-    : `Kept warm: next message reuses ${context ? fmtTokens(context.used) : "the cache"}. Ping at ${next}.`
+/** While warming: the last ping and when the next is due, for the notice line. */
+async function warmingOf($: EngineInterface, { cache }: ContextCacheSnapshot): Promise<ContextCacheWarming | null> {
+  if ((await read($, warmUntilAtom)) === null || cache.lastAt === null) return null
+  return { lastPing, nextAt: cache.lastAt + WARM_AFTER_MS }
 }
 
 /** Why the cache can't be kept warm now, or null when it can. */

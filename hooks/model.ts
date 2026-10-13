@@ -11,6 +11,7 @@ import type {
   ContextCacheLimitKind,
   ContextCacheSaved,
   ContextCacheSnapshot,
+  ContextCacheWarming,
 } from '../types'
 
 // ── Design tokens ──────────────────────────────────────────────────────────
@@ -469,6 +470,19 @@ export function savedNotice(saved: ContextCacheSaved, price: Price | null, short
     : { lead, rest: ` Each message sends ${fmtTokens(freed)} fewer: ${warm} less warm, ${cold} after a break.` }
 }
 
+/** While Warm runs, in place of the cache notice: the last ping and the next, long, short and tiny. */
+export function warmNotice(w: ContextCacheWarming, context: ContextCacheContext | null): string[] {
+  const next = fmtClock(w.nextAt)
+  const p = w.lastPing
+  return p
+    ? [`Kept warm at ${fmtClock(p.at)}, reuses ${fmtTokens(p.read)}. Next ${next}.`, `Warmed ${fmtClock(p.at)}, next ${next}.`, `Next ping ${next}.`]
+    : [
+        `Kept warm: next message reuses ${context ? fmtTokens(context.used) : 'the cache'}. Ping at ${next}.`,
+        `Kept warm: next ping ${next}.`,
+        `Next ping ${next}.`,
+      ]
+}
+
 /** The fewest words for a terminal line too narrow for any wording above. */
 export function tinyNotice(cache: CacheView, context: ContextCacheContext | null): string {
   if (cache.state === 'cooling') return `Cooling: ${fmtSpan(cache.remainingMs)} left.`
@@ -551,16 +565,16 @@ export function buildView(
   const isShort = isShortNotice(size)
   // Priced wordings first (long, then short), then the same without money;
   // the desktop takes the one its size class names.
-  const options: { lead: string; rest: string }[] = [price, null].flatMap(p =>
-    [false, true].map(short =>
-      snap.saved ? savedNotice(snap.saved, p, short) : { lead: '', rest: noticeText(cache, snap.context, snap.cache.ttlMs, short, p) },
-    ),
-  )
-  if (!snap.saved) options.push({ lead: '', rest: tinyNotice(cache, snap.context) })
+  const options: { lead: string; rest: string }[] = snap.saved
+    ? [price, null].flatMap(p => [false, true].map(short => savedNotice(snap.saved!, p, short)))
+    : snap.warming
+      ? warmNotice(snap.warming, snap.context).map(rest => ({ lead: '', rest }))
+      : [price, null].flatMap(p => [false, true].map(short => ({ lead: '', rest: noticeText(cache, snap.context, snap.cache.ttlMs, short, p) })))
+  if (!snap.saved && !snap.warming) options.push({ lead: '', rest: tinyNotice(cache, snap.context) })
   const chosen =
     fitChars === undefined
-      ? options[isShort ? 1 : 0]
-      : (options.find(o => (o.lead + o.rest).length <= fitChars) ?? options[options.length - 1])
+      ? options[isShort ? 1 : 0]!
+      : (options.find(o => (o.lead + o.rest).length <= fitChars) ?? options[options.length - 1]!)
   const saved = snap.saved ? chosen : null
   const notice = chosen.lead + chosen.rest
 

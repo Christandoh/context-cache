@@ -52,6 +52,14 @@ export type ContextCacheSnapshot = {
   model?: string | null
   /** What the last Clear or Compact took out of the context; shown until the next reply lands. */
   saved?: ContextCacheSaved | null
+  /** While Warm runs: filled in when the panel is drawn, from the warming state. */
+  warming?: ContextCacheWarming | null
+}
+
+/** Keep-warm in progress: the last ping that read the cache (null before the first) and when the next is due. */
+export type ContextCacheWarming = {
+  lastPing: { at: number; read: number } | null
+  nextAt: number
 }
 
 /** A Clear or Compact: the context before and after it, in tokens. */
