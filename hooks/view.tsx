@@ -4,7 +4,7 @@
 
 import type { Elements } from 'claude-code'
 
-import { fmtTokens, pct, TOKENS, tempColorAt, mix, type CacheView, type LimitView, type ViewModel } from './model'
+import { explainFor, explainRows, fmtTokens, pct, TOKENS, tempColorAt, mix, type CacheView, type LimitView, type ViewModel } from './model'
 import { panelSvg } from './panel-svg'
 
 export type Actions = {
@@ -31,6 +31,38 @@ function usageLine(l: LimitView): { main: string; time: string } {
 function cacheLine(c: CacheView): { main: string; hit: string } {
   if (c.state === 'empty') return { main: 'Warmth —', hit: c.hit === null ? '' : ` · Hit ${pct(c.hit)}%` }
   return { main: `Warmth ${pct(c.warmth * 100)}%`, hit: ` · Hit ${c.hit === null ? '—' : `${pct(c.hit)}%`}` }
+}
+
+/**
+ * The card hovering the notice reveals: how its money is worked out. Drawn
+ * hidden, absolutely placed just above the notice's row over the row above
+ * it, so showing it moves nothing. `width` in cells.
+ */
+function explainCard(E: TermEls | DeskEls, explain: string | null, width: number, size: ViewModel['size']) {
+  const text = explainFor(explain, size)
+  if (!text) return null
+  const { Box, Text } = E
+  const w = Math.max(20, width)
+  const lines = explainRows(text, w) - 2
+  return (
+    // No key of its own: a keyed Box drawn hidden is a hover scope the pointer can never be over.
+    <Box
+      position="absolute"
+      top={-(lines + 2)}
+      left={0}
+      width={w}
+      display="none"
+      hover={{ display: 'flex' }}
+      borderStyle="round"
+      borderColor={TOKENS.borderStrong}
+      backgroundColor={TOKENS.card}
+      paddingX={1}
+    >
+      <Text wrap="wrap" color={TOKENS.text2}>
+        {text}
+      </Text>
+    </Box>
+  )
 }
 
 // ── Terminal ───────────────────────────────────────────────────────────────
@@ -238,14 +270,18 @@ export function renderTerminal(E: TermEls, vm: ViewModel, columns: number, actio
   const notice = vm.notice
     ? wide ? (
         <Box flexDirection="row" columnGap={1}>
-          <Box flexGrow={1} flexShrink={1}>
+          <Box key="notice" flexGrow={1} flexShrink={1}>
             <Text wrap="truncate">{noticeText}</Text>
+            {explainCard(E, vm.explain, inner, vm.size)}
           </Box>
           {buttons}
         </Box>
       ) : (
         <Box flexDirection="column">
-          <Text wrap="wrap">{noticeText}</Text>
+          <Box key="notice">
+            <Text wrap="wrap">{noticeText}</Text>
+            {explainCard(E, vm.explain, inner, vm.size)}
+          </Box>
           {buttons}
         </Box>
       )
@@ -296,8 +332,9 @@ export function renderDesktop(E: DeskEls, vm: ViewModel, widthPx: number, action
     actionsRow =
       wide && p.notice ? (
         <Box flexDirection="row" alignItems="center" columnGap={1} paddingRight={padX} paddingBottom={1}>
-          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Box key="notice" flexGrow={1} flexShrink={1} minWidth={0}>
             <Svg source={p.notice.svg} alt={vm.notice} />
+            {explainCard(E, vm.explain, Math.floor(widthPx / 8) - 4, vm.size)}
           </Box>
           {buttons}
         </Box>

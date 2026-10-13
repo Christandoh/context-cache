@@ -508,6 +508,53 @@ export function warmNotice(w: ContextCacheWarming, context: ContextCacheContext 
       ]
 }
 
+/** "$8", "$0.20": a price per token as dollars per million. */
+function perMillion(usdPerToken: number): string {
+  const m = usdPerToken * 1e6
+  return `$${Number.isInteger(m) ? m : m.toFixed(2)}`
+}
+
+/**
+ * What hovering the notice says: how its money is worked out, for example
+ * "≈$3.62 = 452k × $8 per million to write the 1-hour cache". The figure the
+ * notice leads with comes first. Null when the notice shows no money.
+ */
+export function explainNotice(snap: ContextCacheSnapshot, cache: CacheView): string | null {
+  const price = priceOf(snap.model, snap.cache.ttlMs)
+  if (!price || snap.warming) return null
+  const ttl = snap.cache.ttlMs === TTL_5M ? '5-minute' : '1-hour'
+  const read = (n: number) => `${fmtUsd(n * price.read)} = ${fmtTokens(n)} × ${perMillion(price.read)} per million to read the cache`
+  const write = (n: number) => `${fmtUsd(n * price.write)} = ${fmtTokens(n)} × ${perMillion(price.write)} per million to write the ${ttl} cache`
+  if (snap.saved) {
+    const n = Math.max(0, snap.saved.before - snap.saved.after)
+    return `Each message now sends ${fmtTokens(n)} fewer tokens: ${write(n)}; ${read(n)}.`
+  }
+  if (!snap.context) return null
+  const n = snap.context.used
+  if (cache.state === 'warm') return `${read(n)}; ${write(n)}.`
+  if (cache.state === 'cooling') {
+    return `${fmtUsd(n * (price.write - price.read))} more = ${fmtTokens(n)} × (${perMillion(price.write)} − ${perMillion(price.read)}) per million: writing the ${ttl} cache again instead of reading it.`
+  }
+  return `${write(n)}; once warm, ${read(n)}.`
+}
+
+/**
+ * The hover card's text at a size: the band clips what rises past its top, so
+ * the rings layout takes only the first sum ("≈$3.62 = 452k × $8 per
+ * million."), and the smallest, with two rows above the notice, has no card.
+ */
+export function explainFor(explain: string | null, size: SizeClass): string | null {
+  if (!explain || size === 'd') return null
+  if (size !== 'c') return explain
+  const sum = explain.slice(explain.indexOf('≈$'))
+  return `${sum.slice(0, sum.indexOf(' per million') + ' per million'.length)}.`
+}
+
+/** Rows the hover card takes at `width` cells, its border included. */
+export function explainRows(text: string, width: number): number {
+  return Math.ceil(text.length / (width - 4)) + 2
+}
+
 /** The fewest words for a terminal line too narrow for any wording above. */
 export function tinyNotice(cache: CacheView, context: ContextCacheContext | null): string {
   if (cache.state === 'cooling') return `Cooling: ${fmtSpan(cache.remainingMs)} left.`
@@ -564,6 +611,8 @@ export type ViewModel = {
   noticeLead: string
   /** The notice dot's colour: the cache's, or green after a Clear or Compact. */
   noticeDot: string
+  /** What hovering the notice shows: how its money is worked out; null without money. */
+  explain: string | null
   showLegend: boolean
   showDetail: boolean
 }
@@ -642,6 +691,7 @@ export function buildView(
     notice,
     noticeLead: saved ? saved.lead : '',
     noticeDot: saved ? TOKENS.saved : cache.color,
+    explain: explainNotice(snap, cache),
     showLegend: size !== 'd',
     showDetail: size === 'a' || size === 'b',
   }
