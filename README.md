@@ -16,7 +16,7 @@ That's a real session. 315k of a 1M context window, the session limit at 10% wit
 
 Claude Code already tells you all of this, in three places. `/context` has the window, `/usage` has the limits, and the cache is in the usage figures if you know where to look. None of it is on screen while you work, and the one number that changes what you do next, whether your cache is about to expire, isn't anywhere.
 
-The cache matters more than it looks. Every reply re-sends the whole conversation. With the cache warm, 98% of that is served from memory at a tenth of the price. Let it go cold, by walking away for an hour, and the next message pays full price to re-read everything. The panel counts that down and tells you before it happens.
+The cache matters more than it looks. Every reply re-sends the whole conversation. With the cache warm, 98% of that is served from memory at a tenth of the input price on most models, and a twentieth on Opus 5.5. Let it go cold, by walking away for an hour, and the next message pays full price to re-read everything. The panel counts that down and tells you before it happens.
 
 A limit's percentage alone can mislead. Being at 60% of your weekly allowance is fine on Saturday and a problem on Tuesday. So each limit bar carries two layers. The dark one is how much of the window's time has passed, the bright one is how much you've used, and a white tick marks where time is. If the bright bar is past the tick you're ahead of pace, and the bar turns amber. At 90% it turns red.
 
@@ -28,7 +28,15 @@ The middle row is three limits and the cache. Current session is the 5-hour wind
 
 The bottom row is a one-line notice about the cache with three buttons. Clear runs `/clear`. Compact compacts the conversation. The notice puts a price on the next message, for example "Cache cold: next message re-reads 452k for ≈$3.62". After a Clear or Compact it turns green and says what was taken out and what that saves, for example "Cleared 452k. Next message costs ≈$3.57 less, or ≈$0.09 less while the cache is warm." That message stays until the next reply lands. In a narrow terminal the notice takes the longest wording that fits its line, so it never cuts off.
 
-Warm, new in 0.1.6, keeps the cache from going cold while you're away. 55 minutes after the last reply it sends a hidden one-line ping over the conversation. The ping reads the cache at a tenth of the price and resets its hour, so it costs about a twentieth of a cold re-read. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache. With the 5-minute cache, pinging that often would cost more than letting it go cold.
+Hover over the notice and a card above it shows the sum behind its figure, for example "≈$3.62 = 452k × $8 per million to write the 1-hour cache". The narrower layouts keep the sum alone, and the smallest has no card.
+
+Warm keeps the cache from going cold while you're away. 55 minutes after the last reply it sends a hidden one-line ping over the conversation. The ping pays the cache-read price and resets the cache's hour. Going cold would instead pay twice the input price to write the 1-hour cache again, so a ping costs a twentieth of that on Sonnet 5, a fortieth on Opus 5.5 and an eightieth on Fable 5.1. Pressing Warm says the figure for your session's model. Nothing is added to the chat. While it runs, the notice line says when the next ping is due and what the last one read, and each ping raises a toast. The button becomes Stop while it runs, and warming stops on its own when you send a message, after 8 hours, after `/clear`, a compaction or a model switch, or if a ping misses the cache. It only works with the 1-hour cache. With the 5-minute cache, pinging that often would cost more than letting it go cold.
+
+Warm can also switch itself on. `/cache-autowarm 300` turns it on by itself once you've been quiet for 55 minutes with more than 300k in the context, the size where going cold starts to hurt. It's off until you set it. Pressing Stop holds it off until the next reply.
+
+If nothing will keep the 1-hour cache, you hear about it with 5 minutes left, as a notification through your terminal ("Cache goes cold in 5m: send a message to keep 452k cached, or the next one re-writes it for ≈$3.62"), once per reply. The desktop app has no notification channel for mods, so there it's a toast.
+
+As a limit reaches 90%, a toast says so once per window, for example "Weekly at 90%, resets Sat 11:00 pm". When a bar turns amber or red it flashes lighter twice, so the change catches your eye.
 
 Switching model throws the cache away, because each model keeps its own. When the cache is still warm, `/model` or the model picker asks first: "Switching model throws away the warm cache: the next message re-writes 452k for ≈$9.04. Switch anyway?" A switch Claude Code makes on its own, such as a fallback, gets a toast with the same figures afterwards. Claude Code itself supplies the price.
 
@@ -63,7 +71,7 @@ Two limits of the platform worth knowing. The desktop app's ordinary chat has no
 
 `/cache` hides or shows the card.
 
-`/cache-status` prints a diagnostics report. It lists which apps are attached, what the mod has drawn, where each figure came from, whether warming is on, and how the last account usage request went, down to the HTTP status and which window matched Fable. It also totals what was saved today: the tokens Clear and Compact took out, and the Warm pings that kept the cache, each with the cache re-write it spared at list price. The full report also lands in `context-cache-status.json` in the session's working directory.
+`/cache-status` prints a diagnostics report. It lists which apps are attached, what the mod has drawn, where each figure came from, whether warming is on, and how the last account usage request went, down to the HTTP status and which window matched Fable. It also totals what was saved, today and over the last 7 days: the tokens Clear and Compact took out, and the Warm pings that kept the cache, each with the cache re-write it spared at list price. A Prices line names the list prices the money comes from, or says your model is missing from the list in `hooks/model.ts`, which is why the panel would then show tokens without money. The full report also lands in `context-cache-status.json` in the session's working directory.
 
 `/cache-pane` opens the card as a pane, on any device.
 
@@ -71,7 +79,11 @@ Two limits of the platform worth knowing. The desktop app's ordinary chat has no
 
 `/cache-scale` sets how many CSS pixels the desktop draws per band cell. The default is 8. `/cache-scale 8.5` sets a value; a bare `/cache-scale` steps it up by a half, from 7 round to 9.5. You only need it if the card comes out narrower or wider than the composer.
 
-These are five separate commands rather than one with arguments because the desktop composer drops anything typed after a slash command's name.
+`/cache-mini` draws the card as one line, "Context 45% · Cache warm, 59m left · Next message ≈$0.09", shortened to fit the band. Run it again for the whole card. The choice carries over to new sessions.
+
+`/cache-autowarm` sets the context size above which Warm switches itself on, in thousands of tokens. `/cache-autowarm 300` sets 300k, `/cache-autowarm 0` turns it off, and a bare `/cache-autowarm` steps through off, 200k, 300k and 500k.
+
+These are seven separate commands rather than one with arguments because the desktop composer drops anything typed after a slash command's name. That's also why the two that take a number step through values when given none.
 
 ## Where the numbers come from
 
@@ -83,7 +95,7 @@ Every figure has a named source. One is worked out rather than reported. Files i
 | System / Tools / Messages split | the `/context` breakdown, scaled to the real token count |
 | Files | the share of Messages that is `Read` output, by character count |
 | Session and weekly limits | the rate-limit headers of every reply, so they move with each message. The headers can trail the account endpoint by a point, so when both describe the same window the panel shows the higher of the two, which matches `/usage` |
-| Fable, and any reset time a header lacks | Anthropic's account usage endpoint (`api.anthropic.com/api/oauth/usage`), called through Claude Code with your session's own login, so the mod never sees the token. Asked once at session start, then every 5 minutes, and on `/cache-refresh`. Each good reading is saved, so a reopened chat that has not had a reply yet, and whose request is turned away (the endpoint answers 429 when many sessions ask), shows the last saved figures instead of nothing; windows that have reset since are left out. Fable is the `limits[]` item whose scope names Fable, matched by name so a moved key still works |
+| Fable, and any reset time a header lacks | Anthropic's account usage endpoint (`api.anthropic.com/api/oauth/usage`), called through Claude Code with your session's own login, so the mod never sees the token. Asked at most once every 5 minutes across all your open sessions, and on `/cache-refresh`. The first session to ask leaves a note in the mod's store, and the others use the reading it saves rather than asking too. A 429 holds them all back for as long as the endpoint says. Each good reading is saved, so a reopened chat that has not had a reply yet, and whose request is turned away (the endpoint answers 429 when many sessions ask), shows the last saved figures instead of nothing; windows that have reset since are left out. Fable is the `limits[]` item whose scope names Fable, matched by name so a moved key still works |
 | Time % | worked out from each window's reset time and its length (5h or 7d) |
 | Cache TTL (5m or 60m) | read from the `cache_creation` usage of your last response in the transcript, or from Claude Code's own report when you switch model; remembered across sessions |
 | Last cache write | each reply in the main conversation as it arrives, mid-turn included (or, on resume, how long ago the last response was) |

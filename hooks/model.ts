@@ -114,6 +114,13 @@ export function priceOf(model: string | null | undefined, ttlMs: number): Price 
   return { read: list.read / 1e6, write: (list.input * (ttlMs === TTL_5M ? 1.25 : 2)) / 1e6 }
 }
 
+/** a/b as words when it is one of the usual ratios: 1/40 → "a fortieth", else "1/37". */
+export function fraction(part: number, whole: number): string {
+  const n = Math.round(whole / part)
+  const words: Record<number, string> = { 2: 'a half', 4: 'a quarter', 10: 'a tenth', 20: 'a twentieth', 40: 'a fortieth', 80: 'an eightieth' }
+  return words[n] ?? `1/${n}`
+}
+
 /** "≈$3.61", "≈$0.09", "<$0.01". */
 export function fmtUsd(n: number): string {
   if (n < 0.005) return '<$0.01'

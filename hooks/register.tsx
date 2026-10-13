@@ -12,7 +12,12 @@
 //   were cached with (read from the transcript's usage, or the engine's own
 //   model-switch report), and the last turn's cache-read share.
 // - Prices: $.session.model(), priced from the list in model.ts. After a Clear
-//   or Compact the notice says what was taken out (context before and after).
+//   or Compact the notice says what was taken out (context before and after);
+//   hovering the notice shows the sum behind its figure.
+//
+// Also: auto-warm above a context size (/cache-autowarm), a notice when the
+// cache has 5 minutes left, a toast as a limit reaches 90%, a pulse when a bar
+// turns amber or red, and the band as one line (/cache-mini).
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -26,6 +31,7 @@ import {
   fmtSpan,
   fmtTokens,
   fmtUsd,
+  fraction,
   priceOf,
   noticeText,
   pct,
@@ -60,8 +66,9 @@ const warmUntilAtom = atom({ plugin: 'context-cache', key: 'warmUntil' } as cons
 const miniAtom = atom({ plugin: 'context-cache', key: 'isMini' } as const, false)
 
 // Keep-warm: a cache read resets the 1h TTL for free, so one tool-less fork of
-// the main thread 55 min after the last reply keeps it alive at ~0.1x of the
-// context per ping (a cold rewrite is 2x). The fork never enters the transcript.
+// the main thread 55 min after the last reply keeps it alive at the cache-read
+// price (a tenth of input on most models, a twentieth on Opus 5.5) where a
+// cold re-write is 2x input. The fork never enters the transcript.
 const WARM_AFTER_MS = 55 * 60_000
 const WARM_FOR_MS = 8 * 60 * 60_000
 const WARM_PROMPT = 'Keep-alive ping for the prompt cache. Reply with only: ok'
@@ -651,7 +658,14 @@ async function actionsFor($: EngineInterface, isWorking: boolean): Promise<Actio
       }
       lastPing = null
       await update($, warmUntilAtom, () => now + WARM_FOR_MS)
-      $.ui.toast(`Keeping the cache warm: a hidden ping ${WARM_AFTER_MS / 60_000} min after the last reply, for up to 8 hours. Press Stop to end it.`)
+      // What a ping costs against going cold follows the model: a fortieth on Opus 5.5, a twentieth on Sonnet 5.
+      const snap = await current($)
+      const price = priceOf(snap.model, snap.cache.ttlMs)
+      const cost =
+        price && snap.context
+          ? ` Each ping reads ${fmtTokens(snap.context.used)} for ${fmtUsd(snap.context.used * price.read)}, ${fraction(price.read, price.write)} of the ${fmtUsd(snap.context.used * price.write)} re-write going cold costs.`
+          : ''
+      $.ui.toast(`Keeping the cache warm: a hidden ping ${WARM_AFTER_MS / 60_000} min after the last reply, for up to 8 hours.${cost} Press Stop to end it.`)
     },
     clear: async () => {
       if (isWorking) $.ui.toast('Clear runs once the current turn finishes.')
